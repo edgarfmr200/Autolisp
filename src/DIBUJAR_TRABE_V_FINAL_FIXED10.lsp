@@ -90,6 +90,10 @@
                                 losaExt sep_base sep_extra hasAnyLosa yLosaStartAA yLosaStartBB
                                 bbCountBase bbCountInf bbCountSup
                                 yBBMin yBBMax yBBStep bbBranch
+                                bb-use-anchor bb-align
+                                bb-x-left-wide bb-x-right-wide
+                                bb-x-inner-left-step bb-x-inner-right-step
+                                bb-x-anchor bb-x-anchor-l bb-x-anchor-r
 
                                 ;; Ganchos
                                 rBarTop xStirrupLeft yStirrupTop yStirrupBot offsetHookFactor centerBarX centerBarY pH1 pH2
@@ -1679,7 +1683,13 @@
   (setq critBastInf (get-critical-bast bastonesInfList))
   (setq critBastSup (get-critical-bast bastonesSupList))
 
-  (defun process-layer-steel (baseNum baseVar bastNum bastVar isTop / diamBase diamBast yStart dir layoutMode w gap i cx cy)
+  (defun process-layer-steel (baseNum baseVar bastNum bastVar isTop / diamBase diamBast yStart dir layoutMode w gap i cx cy totalBars
+                                                               xL xR xStepL xStepR xAnchor xAnchorL xAnchorR
+                                                               positions remaining nStep nWide bestPos bestGap
+                                                               nOBase nInner reqAnchors
+                                                               ocmema--segment-pos ocmema--max-gap ocmema--merge-unique
+                                                               ocmema--ensure-anchor ocmema--draw-xlist
+                                                               ocmema--sort-num ocmema--sort-insert eps)
      (setq diamBase (* (/ (obtener-diametro-real baseVar) 100.0) 7.0))
      (setq diamBast 0.0)
      (if bastVar (setq diamBast (* (/ (obtener-diametro-real bastVar) 100.0) 7.0)))
@@ -1689,37 +1699,323 @@
      (setq layoutMode (getkword (strcat "\nAcomodo " (if isTop "SUP" "INF") " (Base:" (itoa baseNum) " Bast:" (itoa bastNum) ")? [Orillas/Largo]: ")))
      (if (null layoutMode) (setq layoutMode "Orillas"))
 
-     (if (= layoutMode "Largo")
-       (progn
-         (setq w (- (car p2_st) (car p1_st) diamBase))
-         (setq gap (if (> (+ baseNum bastNum) 1) (/ w (1- (+ baseNum bastNum))) 0.0))
-         (setq i 0)
-         (repeat (+ baseNum bastNum)
-           (setq cx (+ (car p1_st) (/ diamBase 2.0) (* i gap)))
-           (command "_.DONUT" 0.0 diamBase (list cx yStart) "")
-           (command "_.CHPROP" (entlast) "" "Color" 5 "")
-           (setq i (1+ i))
+     (defun ocmema--sort-insert (lst val)
+       (cond
+         ((null lst) (list val))
+         ((< val (car lst)) (cons val lst))
+         (t (cons (car lst) (ocmema--sort-insert (cdr lst) val)))
+       )
+     )
+     (defun ocmema--sort-num (lst / out x)
+       (setq out nil)
+       (foreach x lst
+         (setq out (ocmema--sort-insert out x))
+       )
+       out
+     )
+     (defun ocmema--segment-pos (a b n / gap j out)
+       (setq out nil)
+       (if (and (> n 0) (> (- b a) 1e-6))
+         (progn
+           (setq gap (/ (- b a) (+ n 1.0)))
+           (setq j 1)
+           (repeat n
+             (setq out (append out (list (+ a (* j gap)))))
+             (setq j (1+ j))
+           )
          )
        )
-       (progn
-         ;; Orillas (simple)
-         (setq i 0)
-         (repeat baseNum
-           (setq cx (if (= (rem i 2) 0) (+ (car p1_st) (/ diamBase 2.0)) (- (car p2_st) (/ diamBase 2.0))))
-           (command "_.DONUT" 0.0 diamBase (list cx yStart) "")
-           (command "_.CHPROP" (entlast) "" "Color" 5 "")
-           (setq i (1+ i))
+       out
+     )
+     (defun ocmema--max-gap (lst / s prev maxg)
+       (setq maxg 0.0)
+       (setq s (ocmema--sort-num lst))
+       (if (> (length s) 1)
+         (progn
+           (setq prev (car s))
+           (foreach v (cdr s)
+             (setq maxg (max maxg (- v prev)))
+             (setq prev v)
+           )
          )
-         ;; Bastones se dibujan como donuts adicionales (aprox)
-         (if (and bastVar (> bastNum 0))
+       )
+       maxg
+     )
+     (defun ocmema--merge-unique (lst tol / s out prev)
+       (setq s (ocmema--sort-num lst))
+       (setq out nil)
+       (foreach v s
+         (if (or (null out) (> (abs (- v (car (last out)))) tol))
+           (setq out (append out (list v)))
+         )
+       )
+       out
+     )
+     (defun ocmema--ensure-anchor (pos anchor tol / s idx best d)
+       (setq s pos)
+       (if (and anchor (> (length s) 0))
+         (progn
+           (setq best nil idx 0 d 1e9)
+           (foreach v s
+             (if (< (abs (- v anchor)) d) (progn (setq d (abs (- v anchor))) (setq best idx)))
+             (setq idx (1+ idx))
+           )
+           (if (> d tol)
+             (setq s (subst anchor (nth best s) s))
+           )
+         )
+       )
+       s
+     )
+     (defun ocmema--ensure-ptlist (lst y / out e)
+       (setq out nil)
+       (cond
+         ((null lst) (setq out nil))
+         ((numberp lst)
+           (setq out (list (list lst y)))
+         )
+         ((and (listp lst) (numberp (car lst)))
+           (foreach e lst (setq out (cons (list e y) out)))
+           (setq out (reverse out))
+         )
+         ((and (listp lst) (listp (car lst)) (= (length (car lst)) 2))
+           (setq out lst)
+         )
+       )
+       out
+     )
+     (defun ocmema--draw-xlist (xlist y / isNumList isPtList pts firstPt)
+       (setq isNumList (and (listp xlist) (numberp (car xlist))))
+       (setq isPtList (and (listp xlist) (listp (car xlist)) (= (length (car xlist)) 2)))
+       (princ
+         (strcat
+           "\nOCMEMA: x_list type | num-list=" (if isNumList "T" "nil")
+           " | pt-list=" (if isPtList "T" "nil")
+           " | x_list=" (prin1-to-string xlist)
+         )
+       )
+       (setq pts (ocmema--ensure-ptlist xlist y))
+       (setq firstPt (if (and pts (> (length pts) 0)) (car pts) nil))
+       (princ (strcat "\nOCMEMA: first_pt=" (prin1-to-string firstPt)))
+       (if pts
+         (foreach p pts
+           (command "_.DONUT" 0.0 diamBase p "")
+           (command "_.CHPROP" (entlast) "" "Color" 5 "")
+         )
+       )
+     )
+     (setq eps 1e-4)
+
+     (if bb-use-anchor
+       (progn
+         (setq xL (+ bb-x-left-wide (/ diamBase 2.0)))
+         (setq xR (- bb-x-right-wide (/ diamBase 2.0)))
+         (setq xStepL (+ bb-x-inner-left-step (/ diamBase 2.0)))
+         (setq xStepR (- bb-x-inner-right-step (/ diamBase 2.0)))
+         (setq xAnchor nil xAnchorL nil xAnchorR nil)
+         (cond
+           ((= bb-align "Izq") (setq xAnchor xStepR))
+           ((= bb-align "Der") (setq xAnchor xStepL))
+           (t (setq xAnchorL xStepL xAnchorR xStepR))
+         )
+
+         (if (= layoutMode "Largo")
+           (progn
+             (setq totalBars (+ baseNum bastNum))
+             (if (< totalBars 1) (setq totalBars 1))
+             (setq positions nil)
+             (if (= totalBars 1)
+               (setq positions (list (/ (+ xL xR) 2.0)))
+               (progn
+                 (setq w (- xR xL))
+                 (setq gap (if (> totalBars 1) (/ w (1- totalBars)) 0.0))
+                 (setq i 0)
+                 (repeat totalBars
+                   (setq positions (append positions (list (+ xL (* i gap)))))
+                   (setq i (1+ i))
+                 )
+               )
+             )
+             (cond
+               ((= bb-align "Centro")
+                 (setq positions (ocmema--ensure-anchor positions xAnchorL eps))
+                 (setq positions (ocmema--ensure-anchor positions xAnchorR eps))
+               )
+               (t
+                 (setq positions (ocmema--ensure-anchor positions xAnchor eps))
+               )
+             )
+             (setq positions (ocmema--merge-unique positions eps))
+           )
+           (progn
+             ;; Orillas
+             (princ (strcat "\nA-A: helper segment-pos=" (prin1-to-string 'ocmema--segment-pos)))
+             (setq nOBase baseNum)
+             (if (> baseNum 2)
+               (progn
+                 (setq nOBase (getint "\nCuantas barras van en orillas (Total)?: "))
+                 (if (or (null nOBase) (< nOBase 2)) (setq nOBase 2))
+                 (if (> nOBase baseNum) (setq nOBase baseNum))
+               )
+             )
+             (setq positions (list xL xR))
+             (if (< baseNum 2)
+               (progn
+                 (setq positions (list (/ (+ xL xR) 2.0)))
+                 (setq baseNum 1)
+               )
+             )
+             (cond
+               ((= bb-align "Centro")
+                 (if (< baseNum 4)
+                   (progn
+                     (princ "\nB-B: Orillas centro -> baseNum ajustado a 4")
+                     (setq baseNum 4)
+                   )
+                 )
+               )
+             )
+             (setq reqAnchors (if (= bb-align "Centro") 2 1))
+             (setq nInner (- baseNum nOBase))
+             (if (< nInner reqAnchors)
+               (progn
+                 (setq nOBase (- baseNum reqAnchors))
+                 (if (< nOBase 2) (setq nOBase 2))
+                 (setq nInner (- baseNum nOBase))
+                 (princ "\nB-B: Orillas ajuste para incluir ancla")
+               )
+             )
+             (cond
+               ((= bb-align "Centro")
+                 (setq positions (append positions (list xAnchorL xAnchorR)))
+               )
+               (t
+                 (if (>= baseNum 3) (setq positions (append positions (list xAnchor))))
+               )
+             )
+             (setq positions (ocmema--merge-unique positions eps))
+             (setq remaining (- nInner reqAnchors))
+             (if (> remaining 0)
+               (progn
+                 (if (= bb-align "Centro")
+                   (progn
+                     (setq positions (append positions (ocmema--segment-pos xL xR remaining)))
+                     (setq positions (ocmema--merge-unique positions eps))
+                   )
+                   (progn
+                     (setq bestGap 1e9 bestPos nil)
+                     (setq nStep 0)
+                     (if (> (- xStepR xStepL) 1e-6)
+                       (progn
+                         (setq nStep 0)
+                         (while (<= nStep remaining)
+                           (setq nWide (- remaining nStep))
+                             (if (= bb-align "Izq")
+                               (setq positions (append (list xL xR xAnchor)
+                                             (ocmema--segment-pos xStepL xStepR nStep)
+                                             (ocmema--segment-pos xAnchor xR nWide)))
+                               (setq positions (append (list xL xR xAnchor)
+                                             (ocmema--segment-pos xStepL xStepR nStep)
+                                             (ocmema--segment-pos xL xAnchor nWide)))
+                             )
+                           (setq positions (ocmema--merge-unique positions eps))
+                           (setq gap (ocmema--max-gap positions))
+                           (if (< gap bestGap) (progn (setq bestGap gap) (setq bestPos positions)))
+                           (setq nStep (1+ nStep))
+                         )
+                       )
+                     )
+                     (if bestPos (setq positions bestPos))
+                   )
+                 )
+               )
+             )
+           )
+         )
+
+         (if (numberp positions) (setq positions (list positions)))
+         (setq positions (ocmema--sort-num positions))
+         (princ
+           (strcat
+             "\nB-B: acero capa=" (if isTop "SUP" "INF")
+             " | n_barras=" (itoa baseNum)
+             " | modo=" layoutMode
+             " | alineacion=" bb-align
+             " | x_left_wide=" (rtos bb-x-left-wide 2 3)
+             " | x_right_wide=" (rtos bb-x-right-wide 2 3)
+             " | x_inner_left_step=" (rtos bb-x-inner-left-step 2 3)
+             " | x_inner_right_step=" (rtos bb-x-inner-right-step 2 3)
+             (if xAnchor
+               (strcat " | x_anchor=" (rtos xAnchor 2 3))
+               (strcat " | x_anchor_L=" (rtos xAnchorL 2 3) " | x_anchor_R=" (rtos xAnchorR 2 3))
+             )
+             " | x_list=" (prin1-to-string positions)
+           )
+         )
+
+         (ocmema--draw-xlist positions yStart)
+
+         (if (and (= layoutMode "Orillas") bastVar (> bastNum 0))
            (progn
              (setq i 0)
              (repeat bastNum
-               (setq cx (if (= (rem i 2) 0) (+ (car p1_st) (/ diamBast 2.0)) (- (car p2_st) (/ diamBast 2.0))))
+               (setq cx (if (= (rem i 2) 0) xL xR))
                (setq cy (+ yStart (* (+ 1 (fix (/ i 2))) diamBast dir)))
                (command "_.DONUT" 0.0 diamBast (list cx cy) "")
                (command "_.CHPROP" (entlast) "" "Color" 5 "")
                (setq i (1+ i))
+             )
+           )
+         )
+       )
+       (progn
+         (if (= layoutMode "Largo")
+           (progn
+             (setq w (- (car p2_st) (car p1_st) diamBase))
+             (setq gap (if (> (+ baseNum bastNum) 1) (/ w (1- (+ baseNum bastNum))) 0.0))
+             (setq i 0)
+             (repeat (+ baseNum bastNum)
+               (setq cx (+ (car p1_st) (/ diamBase 2.0) (* i gap)))
+               (command "_.DONUT" 0.0 diamBase (list cx yStart) "")
+               (command "_.CHPROP" (entlast) "" "Color" 5 "")
+               (setq i (1+ i))
+             )
+           )
+           (progn
+             ;; Orillas (simple)
+             (setq xL (+ (car p1_st) (/ diamBase 2.0)))
+             (setq xR (- (car p2_st) (/ diamBase 2.0)))
+             (setq nOBase baseNum)
+             (if (> baseNum 2)
+               (progn
+                 (setq nOBase (getint "\nCuantas barras van en orillas (Total)?: "))
+                 (if (or (null nOBase) (< nOBase 2)) (setq nOBase 2))
+                 (if (> nOBase baseNum) (setq nOBase baseNum))
+               )
+             )
+             (setq nInner (- baseNum nOBase))
+             (setq positions (list xL xR))
+             (if (< baseNum 2)
+               (setq positions (list (/ (+ xL xR) 2.0)))
+             (if (> nInner 0)
+               (setq positions (append positions (ocmema--segment-pos xL xR nInner)))
+               )
+             )
+             (setq positions (ocmema--merge-unique positions eps))
+             (if (numberp positions) (setq positions (list positions)))
+             (ocmema--draw-xlist positions yStart)
+             ;; Bastones se dibujan como donuts adicionales (aprox)
+             (if (and bastVar (> bastNum 0))
+               (progn
+                 (setq i 0)
+                 (repeat bastNum
+                   (setq cx (if (= (rem i 2) 0) (+ (car p1_st) (/ diamBast 2.0)) (- (car p2_st) (/ diamBast 2.0))))
+                   (setq cy (+ yStart (* (+ 1 (fix (/ i 2))) diamBast dir)))
+                   (command "_.DONUT" 0.0 diamBast (list cx cy) "")
+                   (command "_.CHPROP" (entlast) "" "Color" 5 "")
+                   (setq i (1+ i))
+                 )
+               )
              )
            )
          )
@@ -1743,6 +2039,7 @@
       " | bastonesSupVacia=" (ocmema--list-empty bastonesSupList)
     )
   )
+  (setq bb-use-anchor nil)
   (process-layer-steel numPlan varPlan (cadr critBastInf) (car critBastInf) nil)
   (process-layer-steel numPlan varPlan (cadr critBastSup) (car critBastSup) T)
   (princ "\nOCMEMA: A-A acero end | rutina=process-layer-steel")
@@ -1859,6 +2156,13 @@
       (command "_.LINE" pH2 (polar pH2 (* 45.0 (/ pi 180.0)) 0.30) "")
       (command "_.CHPROP" (entlast) "" "Color" 3 "")
       (princ "\nB-B: gancho escalonado dibujado (inf-izq)")
+
+      (setq bb-use-anchor T)
+      (setq bb-align almaAlign)
+      (setq bb-x-left-wide (car p1_st_BB_main))
+      (setq bb-x-right-wide (car p2_st_BB_main))
+      (setq bb-x-inner-left-step (car p1_st_BB_step))
+      (setq bb-x-inner-right-step (car p2_st_BB_step))
 
       (setq bbCountBase (if (numberp numPlan) numPlan 0))
       (setq bbCountInf (if (numberp (cadr critBastInf)) (cadr critBastInf) 0))
