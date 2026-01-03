@@ -86,7 +86,8 @@
                                 p1_st p2_st p1_st_BB p2_st_BB
                                 p1_st_BB_main p2_st_BB_main p1_st_BB_step p2_st_BB_step
                                 draw-break-line
-                                hasLosa typeLosa capaCompresion h_losa alignLosa yLosaStart
+                                hasLosa typeLosa typeLosaAA typeLosaBB capaCompresion h_losa alignLosa
+                                losaExt sep_base sep_extra hasAnyLosa yLosaStartAA yLosaStartBB
                                 bbCountBase bbCountInf bbCountSup
                                 yBBMin yBBMax yBBStep bbBranch
 
@@ -1486,10 +1487,42 @@
   (command "_.RECTANG" "_F" 0 (list xSec ySec) (list (+ xSec bG_draw) (+ ySec hS_draw)))
   (command "_.CHPROP" (entlast) "" "Color" 7 "")
 
+  ;; Losa (preguntar por separado A-A y B-B)
+  (setq losaExt 0.5)
+  (initget "Ninguna Izq Der Ambos")
+  (setq typeLosaAA (getkword "\nLosa A-A? [Ninguna/Izq/Der/Ambos] <Ninguna>: "))
+  (if (null typeLosaAA) (setq typeLosaAA "Ninguna"))
+  (setq typeLosaBB "Ninguna")
+  (if (= (length uniqueKeys) 2)
+    (progn
+      (initget "Ninguna Izq Der Ambos")
+      (setq typeLosaBB (getkword "\nLosa B-B? [Ninguna/Izq/Der/Ambos] <Ninguna>: "))
+      (if (null typeLosaBB) (setq typeLosaBB "Ninguna"))
+    )
+  )
+  (setq sep_base 1.2)
+  (setq sep_extra 0.0)
+  (if (or (= typeLosaAA "Der") (= typeLosaAA "Ambos")) (setq sep_extra (+ sep_extra losaExt)))
+  (if (or (= typeLosaBB "Izq") (= typeLosaBB "Ambos")) (setq sep_extra (+ sep_extra losaExt)))
+  (setq hasAnyLosa (or (not (= typeLosaAA "Ninguna")) (not (= typeLosaBB "Ninguna"))))
+  (if hasAnyLosa
+    (progn
+      (setq capaCompresion (* (/ (getreal "Capa Compresion (cm): ") 100.0) 7.0))
+      (setq h_losa (* (/ (getreal "Altura Total Losa (cm): ") 100.0) 7.0))
+      (setq alignLosa "Arriba")
+      (if (not (equal hS_draw h_losa 0.01))
+        (progn
+          (initget "Arriba Abajo Centro")
+          (setq alignLosa (getkword "Alineacion Losa? [Arriba/Abajo/Centro]: "))
+        )
+      )
+    )
+  )
+
   ;; Si hay 2 secciones, dibujar B-B peraltada compuesta a la derecha
   (if (= (length uniqueKeys) 2)
     (progn
-      (setq xSecB (+ xSec bG_draw 1.2))
+      (setq xSecB (+ xSec bG_draw sep_base sep_extra))
       (setq ySecB ySec)
 
       (command "_.TEXT" "_J" "_ML" (list xSecB (+ ySecB hG_draw 0.6)) 0.18 0 "B-B")
@@ -1557,26 +1590,12 @@
   ;; (Losa y estribo/ganchos se mantienen SOLO sobre A-A para no romper lógica visual;
   ;;  en B-B el usuario puede revisar contorno. Esto mantiene robustez.)
 
-  ;; Losa (igual V13 sobre A-A)
-  (initget "Si No")
-  (setq hasLosa (getkword "\nLleva Losa? [Si/No] <No>: "))
-  (if (= hasLosa "Si")
+  ;; Losa (dibujar segun selecciones A-A y B-B)
+  (if hasAnyLosa
     (progn
-      (initget "Izq Der Ambos")
-      (setq typeLosa (getkword "Lado? [Izq/Der/Ambos]: "))
-      (setq capaCompresion (* (/ (getreal "Capa Compresion (cm): ") 100.0) 7.0))
-      (setq h_losa (* (/ (getreal "Altura Total Losa (cm): ") 100.0) 7.0))
-      (setq alignLosa "Arriba")
-      (if (not (equal hS_draw h_losa 0.01))
-        (progn
-          (initget "Arriba Abajo Centro")
-          (setq alignLosa (getkword "Alineacion Losa? [Arriba/Abajo/Centro]: "))
-        )
-      )
-
-      (setq yLosaStart (+ ySec hS_draw))
-      (if (= alignLosa "Abajo") (setq yLosaStart (+ ySec h_losa)))
-      (if (= alignLosa "Centro") (setq yLosaStart (+ ySec (/ hS_draw 2.0) (/ h_losa 2.0))))
+      (setq yLosaStartAA (+ ySec hS_draw))
+      (if (= alignLosa "Abajo") (setq yLosaStartAA (+ ySec h_losa)))
+      (if (= alignLosa "Centro") (setq yLosaStartAA (+ ySec (/ hS_draw 2.0) (/ h_losa 2.0))))
 
       (defun draw-break-line (xStart yTop hLosa hCapa isLeft / dir xEnd yCenter ptsHatch)
          (setq dir (if isLeft -1.0 1.0))
@@ -1600,8 +1619,18 @@
          (command "_.CHPROP" (entlast) "" "Color" 7 "")
       )
 
-      (if (or (= typeLosa "Izq") (= typeLosa "Ambos")) (draw-break-line xSec yLosaStart h_losa capaCompresion T))
-      (if (or (= typeLosa "Der") (= typeLosa "Ambos")) (draw-break-line (+ xSec bG_draw) yLosaStart h_losa capaCompresion nil))
+      (if (or (= typeLosaAA "Izq") (= typeLosaAA "Ambos")) (draw-break-line xSec yLosaStartAA h_losa capaCompresion T))
+      (if (or (= typeLosaAA "Der") (= typeLosaAA "Ambos")) (draw-break-line (+ xSec bG_draw) yLosaStartAA h_losa capaCompresion nil))
+
+      (if (= (length uniqueKeys) 2)
+        (progn
+          (setq yLosaStartBB (+ ySecB hS_draw))
+          (if (= alignLosa "Abajo") (setq yLosaStartBB (+ ySecB h_losa)))
+          (if (= alignLosa "Centro") (setq yLosaStartBB (+ ySecB (/ hS_draw 2.0) (/ h_losa 2.0))))
+          (if (or (= typeLosaBB "Izq") (= typeLosaBB "Ambos")) (draw-break-line xSecB yLosaStartBB h_losa capaCompresion T))
+          (if (or (= typeLosaBB "Der") (= typeLosaBB "Ambos")) (draw-break-line (+ xSecB bG_draw) yLosaStartBB h_losa capaCompresion nil))
+        )
+      )
     )
   )
 
