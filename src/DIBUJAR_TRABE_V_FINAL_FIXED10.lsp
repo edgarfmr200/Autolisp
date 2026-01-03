@@ -1765,14 +1765,45 @@
       ;; Estribo escalonado (zona peraltada): rectangulo completo (bS_draw x hS_draw)
       (if isAlignInf
         (progn
-          ;; zona ancha abajo: estribo escalonado cruza dentro de la zona ancha
-          (setq p1_st_BB_step (list (+ xSecB almaX0 rec_draw) (+ ySecB rec_draw)))
-          (setq p2_st_BB_step (list (- (+ xSecB almaX0 bS_draw) rec_draw) (- (+ ySecB hS_draw) rec_draw)))
+          (setq yBotWide ySecB)
+          (setq yTopWide (+ ySecB hS_draw))
         )
         (progn
-          ;; zona ancha arriba: estribo escalonado cruza dentro de la zona ancha
-          (setq p1_st_BB_step (list (+ xSecB almaX0 rec_draw) (+ ySecB (- hG_draw hS_draw) rec_draw)))
-          (setq p2_st_BB_step (list (- (+ xSecB almaX0 bS_draw) rec_draw) (- (+ ySecB hG_draw) rec_draw)))
+          (setq yBotWide (+ ySecB (- hG_draw hS_draw)))
+          (setq yTopWide (+ ySecB hG_draw))
+        )
+      )
+      (if isAlignInf
+        (progn
+          ;; zona ancha abajo: estribo escalonado sobresale hacia arriba
+          (setq outer_step_x0 (+ xSecB almaX0))
+          (setq outer_step_x1 (+ xSecB almaX0 bS_draw))
+          (setq outer_step_y0 yBotWide)
+          (setq outer_step_y1 (+ yBotWide hG_draw))
+        )
+        (progn
+          ;; zona ancha arriba: estribo escalonado sobresale hacia abajo
+          (setq outer_step_x0 (+ xSecB almaX0))
+          (setq outer_step_x1 (+ xSecB almaX0 bS_draw))
+          (setq outer_step_y1 yTopWide)
+          (setq outer_step_y0 (- yTopWide hG_draw))
+        )
+      )
+      (setq p1_st_BB_step (list (+ outer_step_x0 rec_draw) (+ outer_step_y0 rec_draw)))
+      (setq p2_st_BB_step (list (- outer_step_x1 rec_draw) (- outer_step_y1 rec_draw)))
+      (princ
+        (strcat
+          "\nB-B: logs | alineacion=" alignChoice
+          " | hG=" (rtos hG_draw 2 3)
+          " | hS=" (rtos hS_draw 2 3)
+          " | wide_y0=" (rtos yBotWide 2 3)
+          " | wide_y1=" (rtos yTopWide 2 3)
+          " | outer_y0=" (rtos outer_step_y0 2 3)
+          " | outer_y1=" (rtos outer_step_y1 2 3)
+          " | inner_y0=" (rtos (cadr p1_st_BB_step) 2 3)
+          " | inner_y1=" (rtos (cadr p2_st_BB_step) 2 3)
+          " | cover=" (rtos rec_draw 2 3)
+          " | step_h=" (rtos (- (cadr p2_st_BB_step) (cadr p1_st_BB_step)) 2 3)
         )
       )
       (princ
