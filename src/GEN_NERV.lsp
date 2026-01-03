@@ -1,0 +1,304 @@
+(defun c:GEN_NERV (/ *error* file path dirPath fullPath numNerv jobName dateStr fc matName E_mod peralte capa_comp sep_nerv ancho_nerv 
+                     nervName numClaros hasCantilever cantPos spanLengths coordList i spanLen 
+                     totalLen memberCount supportStr loadCount loadType loadVal d1 d2)
+
+  (vl-load-com)
+
+  (defun *error* (msg)
+    (if (and msg (not (wcmatch (strcase msg) "*BREAK*,*CANCEL*,*EXIT*")))
+      (princ (strcat "\nError: " msg))
+    )
+    (if file (close file))
+    (princ)
+  )
+
+  ;; --- CONFIGURACIÓN DE RUTA POR DEFECTO ---
+  (setq defaultPath "C:\\Users\\edgar\\OneDrive - ITESO\\OCMEMA_IE\\01. PROYECTOS\\")
+
+  (princ "\n--- DATOS GENERALES DEL PROYECTO ---")
+  
+  (setq numNerv (getint "\nCantidad de nervaduras a generar: "))
+  
+  ;; Validación Nombre del Proyecto
+  (setq jobName "")
+  (while (or (= jobName "") (vl-string-search " " jobName))
+    (setq jobName (getstring "\nNombre del Proyecto (Sin espacios): "))
+    (if (vl-string-search " " jobName)
+      (princ "\nError: El nombre no puede contener espacios.")
+    )
+  )
+
+  (setq dateStr (menucmd "M=$(edtime,$(getvar,date),DD-MON-YY)"))
+  (princ (strcat "\nFecha detectada: " dateStr))
+
+  ;; Materiales
+  (setq fc (getreal "\nIntroduce el F'c del concreto (kg/cm2): "))
+  ;; Generamos el nombre del material dinámicamente, ej: fc_250
+  (setq matName (strcat "fc_" (rtos fc 2 0)))
+  
+  (setq E_mod (getreal "\nIntroduce el Modulo de Elasticidad E (kg/cm2): "))
+  (setq peralte (getreal "\nPeralte total de la losa (cm) [YD]: "))
+  (setq capa_comp (getreal "\nAltura de capa de compresion (cm): "))
+  (setq sep_nerv (getreal "\nSeparacion entre nervaduras (cm) [ZD]: "))
+  (setq ancho_nerv 10.0) 
+  
+  (setq YB (- peralte capa_comp))
+
+  ;; Variable para almacenar la ruta elegida la primera vez
+  (setq dirPath nil)
+
+  ;; --- BUCLE PRINCIPAL ---
+  (setq n 1)
+  (repeat numNerv
+    (princ (strcat "\n\n--- CONFIGURANDO NERVADURA " (itoa n) " de " (itoa numNerv) " ---"))
+    
+    (setq nervName (getstring "\nNombre de la nervadura (ej. N-1): "))
+
+    ;; GESTIÓN DE GUARDADO DE ARCHIVO
+    (if (= n 1)
+      (progn
+        (setq fullPath (getfiled (strcat "Guardar " nervName) (strcat defaultPath nervName ".std") "std" 1))
+        (if fullPath
+          (setq dirPath (vl-filename-directory fullPath))
+          (progn (princ "\nCancelado por usuario.") (exit))
+        )
+      )
+      (setq fullPath (strcat dirPath "\\" nervName ".std"))
+    )
+
+    (if fullPath
+      (progn
+        (setq file (open fullPath "w"))
+        (princ (strcat "\nGenerando archivo en: " fullPath))
+        
+        ;; 1. HEADER
+        (write-line "STAAD PLANE" file)
+        (write-line "* --- INFORMACION DEL TRABAJO ---" file)
+        (write-line "START JOB INFORMATION" file)
+        (write-line (strcat "JOB NAME " jobName) file)
+        (write-line (strcat "ENGINEER DATE " dateStr) file)
+        (write-line "END JOB INFORMATION" file)
+        (write-line "INPUT WIDTH 79" file)
+        (write-line "UNIT CM KG" file) 
+        
+        ;; 2. GEOMETRÍA
+        (write-line "* --- GEOMETRIA Y NODOS ---" file)
+        (setq numClaros (getint "\nNumero de claros: "))
+        
+        ;; LÓGICA DE VOLADIZOS CORREGIDA
+        (setq cantPos "Ninguno")
+        
+        (if (> numClaros 1)
+          (progn
+            (initget "Si No")
+            (setq hasCantilever (getkword "\nExiste algun voladizo? [Si/No] <No>: "))
+            (if (null hasCantilever) (setq hasCantilever "No"))
+            
+            (if (= hasCantilever "Si")
+              (progn
+                (initget "Inicio Final")
+                (setq cantPos (getkword "\nDonde esta el voladizo? [Inicio/Final]: "))
+              )
+            )
+          )
+          ;; Si es 1 claro, no preguntamos y asumimos que no hay voladizo
+          (setq hasCantilever "No")
+        )
+
+        (setq spanLengths '())
+        (setq i 1)
+        (repeat numClaros
+          (setq spanLen (getreal (strcat "\nLongitud del claro " (itoa i) " (cm): ")))
+          (setq spanLengths (append spanLengths (list spanLen)))
+          (setq i (1+ i))
+        )
+
+        (write-line "JOINT COORDINATES" file)
+        (setq currentX 0.0)
+        (write-line (strcat "1 " (rtos currentX 2 2) " 0 0;") file)
+        
+        (setq nodeIdx 2)
+        (foreach len spanLengths
+          (setq currentX (+ currentX len))
+          (write-line (strcat (itoa nodeIdx) " " (rtos currentX 2 2) " 0 0;") file)
+          (setq nodeIdx (1+ nodeIdx))
+        )
+
+        (write-line "* --- INCIDENCIAS DE MIEMBROS ---" file)
+        (write-line "MEMBER INCIDENCES" file)
+        (setq memberCount numClaros)
+        (setq i 1)
+        (repeat memberCount
+          (write-line (strcat (itoa i) " " (itoa i) " " (itoa (1+ i)) ";") file)
+          (setq i (1+ i))
+        )
+
+        ;; 3. MATERIALES (NOMBRE DINÁMICO)
+        (write-line "* --- DEFINICION DE MATERIALES ---" file)
+        (write-line "DEFINE MATERIAL START" file)
+        ;; Usamos matName (ej. fc_250)
+        (write-line (strcat "ISOTROPIC " matName) file) 
+        (write-line (strcat "E " (rtos E_mod 2 2)) file)
+        (write-line "POISSON 0.17" file)
+        (write-line "DENSITY 0.0024" file) 
+        (write-line "ALPHA 1e-05" file)
+        (write-line "DAMP 0.05" file)
+        (write-line (strcat "G " (rtos (/ E_mod 2.34) 2 2)) file)
+        (write-line "TYPE CONCRETE" file)
+        (write-line "END DEFINE MATERIAL" file)
+
+        ;; 4. PROPIEDADES
+        (write-line "* --- PROPIEDADES DE LA NERVADURA ---" file)
+        (write-line "MEMBER PROPERTY" file)
+        (write-line (strcat "1 TO " (itoa memberCount) " PRIS YD " (rtos peralte 2 2) " ZD " (rtos sep_nerv 2 2) " YB " (rtos YB 2 2) " ZB " (rtos ancho_nerv 2 2)) file)
+
+        ;; 5. CONSTANTES
+        (write-line "* --- CONSTANTES Y AGRIETAMIENTO ---" file)
+        (write-line "CONSTANTS" file)
+        ;; Asignamos el material con nombre dinámico
+        (write-line (strcat "MATERIAL " matName " ALL") file)
+        (write-line "MEMBER CRACKED" file)
+        (write-line (strcat "1 TO " (itoa memberCount) " REDUCTION RIX 0.5 RIY 0.5 RIZ 0.5") file)
+
+        ;; 6. SOPORTES
+        (write-line "* --- CONDICIONES DE APOYO ---" file)
+        (write-line "SUPPORTS" file)
+        (setq totalNodes (1+ memberCount))
+        (cond
+          ((= cantPos "Ninguno")
+           (write-line (strcat "1 TO " (itoa totalNodes) " PINNED") file)
+          )
+          ((= cantPos "Inicio")
+           (write-line (strcat "2 TO " (itoa totalNodes) " PINNED") file)
+          )
+          ((= cantPos "Final")
+           (write-line (strcat "1 TO " (itoa memberCount) " PINNED") file)
+          )
+        )
+
+        ;; 7. CARGAS
+        (write-line "* --- DEFINICION DE CARGAS ---" file)
+        (write-line "LOAD 1 LOADTYPE Dead TITLE CARGA MUERTA" file)
+        (write-line "UNIT METER KG" file) 
+        (write-line "* CARGAS MUERTAS APLICADAS" file)
+        (write-line "MEMBER LOAD" file)
+        
+        (princ "\n--- CARGAS MUERTAS ---")
+        (setq memID 1)
+        (repeat memberCount
+          (princ (strcat "\nClaro " (itoa memID) " (Muerta):"))
+          (setq numLoads (getint "\nCantidad de cargas? (0 para ninguna): "))
+          (if (not numLoads) (setq numLoads 0))
+          
+          (repeat numLoads
+            (initget "UC UP P") 
+            (setq loadType (getkword "\nTipo? [UC(Completa)/UP(Parcial)/P(Puntual)]: "))
+            
+            (cond
+              ((= loadType "UC")
+               (setq loadVal (getreal "\nCarga (kg/m): "))
+               (write-line (strcat (itoa memID) " UNI GY -" (rtos loadVal 2 2)) file)
+              )
+              ((= loadType "UP")
+               (setq loadVal (getreal "\nCarga (kg/m): "))
+               (setq d1 (getreal "\nDist. Inicio (m): "))
+               (setq d2 (getreal "\nDist. Final (m): "))
+               (write-line (strcat (itoa memID) " UNI GY -" (rtos loadVal 2 2) " " (rtos d1 2 2) " " (rtos d2 2 2)) file)
+              )
+              ((= loadType "P")
+               (setq loadVal (getreal "\nCarga (kg): "))
+               (setq d1 (getreal "\nDistancia (m): "))
+               (write-line (strcat (itoa memID) " CON GY -" (rtos loadVal 2 2) " " (rtos d1 2 2)) file)
+              )
+            )
+          )
+          (setq memID (1+ memID))
+        )
+
+        (write-line "LOAD 2 LOADTYPE Live TITLE CARGA VIVA" file)
+        (write-line "* CARGAS VIVAS APLICADAS" file)
+        (write-line "MEMBER LOAD" file)
+        
+        (princ "\n--- CARGAS VIVAS ---")
+        (setq memID 1)
+        (repeat memberCount
+          (princ (strcat "\nClaro " (itoa memID) " (Viva):"))
+          (setq numLoads (getint "\nCantidad de cargas? (0 para ninguna): "))
+          (if (not numLoads) (setq numLoads 0))
+          
+          (repeat numLoads
+            (initget "UC UP P")
+            (setq loadType (getkword "\nTipo? [UC(Completa)/UP(Parcial)/P(Puntual)]: "))
+            
+            (cond
+              ((= loadType "UC")
+               (setq loadVal (getreal "\nCarga (kg/m): "))
+               (write-line (strcat (itoa memID) " UNI GY -" (rtos loadVal 2 2)) file)
+              )
+              ((= loadType "UP")
+               (setq loadVal (getreal "\nCarga (kg/m): "))
+               (setq d1 (getreal "\nDist. Inicio (m): "))
+               (setq d2 (getreal "\nDist. Final (m): "))
+               (write-line (strcat (itoa memID) " UNI GY -" (rtos loadVal 2 2) " " (rtos d1 2 2) " " (rtos d2 2 2)) file)
+              )
+              ((= loadType "P")
+               (setq loadVal (getreal "\nCarga (kg): "))
+               (setq d1 (getreal "\nDistancia (m): "))
+               (write-line (strcat (itoa memID) " CON GY -" (rtos loadVal 2 2) " " (rtos d1 2 2)) file)
+              )
+            )
+          )
+          (setq memID (1+ memID))
+        )
+
+        (write-line "* --- COMBINACIONES DE CARGA ---" file)
+        (write-line "LOAD COMB 3 1.2 CM + 1.6 CV" file)
+        (write-line "1 1.2 2 1.6" file)
+        (write-line "LOAD COMB 4 CM + CV" file)
+        (write-line "1 1.0 2 1.0" file)
+        (write-line "LOAD COMB 5 1.4 CM" file)
+        (write-line "1 1.4" file)
+
+        (write-line "PERFORM ANALYSIS" file)
+        
+        ;; --- DISEÑO DE CONCRETO ACTUALIZADO ---
+        (write-line "UNIT CM KG" file) 
+        
+        (write-line "* --- PARAMETROS DE DISEÑO DE CONCRETO ---" file)
+        (write-line "START CONCRETE DESIGN" file)
+        (write-line "CODE ACI" file)
+        
+        (write-line "* ESPECIFICACIONES DE RECUBRIMIENTO" file)
+        (write-line "CLB 2 ALL" file)
+        (write-line "CLT 2 ALL" file)
+        (write-line "CLS 1.5 ALL" file)
+        
+        (write-line "* ESPECIFICACIONES DEL CONCRETO (F'c)" file)
+        ;; Aquí se usa el valor numérico (ej. 250)
+        (write-line (strcat "FC " (rtos fc 2 0) " ALL") file)
+        
+        (write-line "* ESPECIFICACIONES DEL ACERO (Fy)" file)
+        (write-line "FYMAIN 4200 ALL" file)
+        (write-line "FYSEC 4200 ALL" file)
+        
+        (write-line "* LIMITES DE VARILLAS (METRICO 13mm y 16mm)" file)
+        (write-line "MINMAIN 13 ALL" file)
+        (write-line "MAXMAIN 16 ALL" file)
+        
+        (write-line "* NIVEL DE DETALLE DEL REPORTE" file)
+        (write-line "TRACK 2 ALL" file)
+        
+        (write-line "DESIGN BEAM ALL" file)
+        (write-line "CONCRETE TAKE" file)
+        (write-line "END CONCRETE DESIGN" file)
+        (write-line "FINISH" file)
+
+        (close file)
+        (princ (strcat "\nArchivo generado: " nervName))
+      )
+    )
+    (setq n (1+ n))
+  )
+  (princ "\nProceso terminado.")
+  (princ)
+)

@@ -1,0 +1,420 @@
+                                                                 PAGE NO.    1
+
+
+
+             ****************************************************        
+             *                                                  *        
+             *           STAAD.PRO 2025/Academic                *        
+             *           Version  25.00.00.539                  *        
+             *           Proprietary Program of                 *        
+             *           Bentley Systems, Inc.                  *        
+             *           Date=    DEC 16, 2025                  *        
+             *           Time=    19:18:52                      *        
+             *                                                  *        
+             *  Licensed to: ITESO                              *        
+             ****************************************************        
+
+
+
+     1. STAAD PLANE
+INPUT FILE: C:\Users\edgar\OneDrive - ITESO\OCMEMA_IE\01. PROYECTOS\2025\PRUEBA_TRABES\T-15.STD
+     2. * --- INFORMACION DEL TRABAJO -- -
+     3. START JOB INFORMATION
+     4. JOB NAME AMECA
+     5. ENGINEER DATE 16-DEC-25
+     6. END JOB INFORMATION
+     7. INPUT WIDTH 79
+     8. UNIT CM KG
+     9. * --- GEOMETRIA Y NODOS -- -
+    10. JOINT COORDINATES
+    11. 1 0 0 0
+    12. 2 250 0 0
+    13. 3 660 0 0
+    14. 4 1010 0 0
+    15. * --- INCIDENCIAS DE MIEMBROS -- -
+    16. MEMBER INCIDENCES
+    17. 1 1 2
+    18. 2 2 3
+    19. 3 3 4
+    20. * --- DEFINICION DE MATERIALES -- -
+    21. DEFINE MATERIAL START
+    22. ISOTROPIC FC_200
+    23. E 120000
+    24. POISSON 0.17
+    25. DENSITY 0.0024
+    26. ALPHA 1E-05
+    27. DAMP 0.05
+    28. G 51282.05
+    29. TYPE CONCRETE
+    30. END DEFINE MATERIAL
+    31. * --- PROPIEDADES DE LA TRABE -- -
+    32. MEMBER PROPERTY
+    33. 1 PRIS YD 25 ZD 30
+    34. 2 PRIS YD 50 ZD 15
+    35. 3 PRIS YD 25 ZD 30
+    36. * --- CONSTANTES Y AGRIETAMIENTO -- -
+    37. CONSTANTS
+    38. MATERIAL FC_200 ALL
+     STAAD PLANE                                              -- PAGE NO.    2
+    * --- INFORMACION DEL TRABAJO -- -          
+    39. MEMBER CRACKED
+    40. 1 TO 3 REDUCTION RIX 0.5 RIY 0.5 RIZ 0.5
+    41. * --- CONDICIONES DE APOYO -- -
+    42. SUPPORTS
+    43. 1 TO 4 PINNED
+    44. * --- DEFINICION DE CARGAS -- -
+    45. LOAD 1 LOADTYPE DEAD TITLE CARGA MUERTA
+    46. SELFWEIGHT Y -1
+    47. UNIT METER KG
+    48. * CARGAS MUERTAS APLICADAS
+    49. MEMBER LOAD
+    50. 1 UNI GY -800
+    51. 2 UNI GY -1800
+    52. 3 UNI GY -900 0 2
+    53. LOAD 2 LOADTYPE LIVE TITLE CARGA VIVA
+    54. * CARGAS VIVAS APLICADAS
+    55. MEMBER LOAD
+    56. 1 UNI GY -150
+    57. 2 UNI GY -30
+    58. 3 UNI GY -120
+    59. * --- COMBINACIONES DE CARGA -- -
+    60. LOAD COMB 3 1.2 CM + 1.6 CV
+    61. 1 1.2 2 1.6
+    62. LOAD COMB 4 CM + CV
+    63. 1 1.0 2 1.0
+    64. LOAD COMB 5 1.4 CM
+    65. 1 1.4
+    66. PERFORM ANALYSIS
+
+
+
+            P R O B L E M   S T A T I S T I C S
+            -----------------------------------
+
+     NUMBER OF JOINTS          4  NUMBER OF MEMBERS       3
+     NUMBER OF PLATES          0  NUMBER OF SOLIDS        0
+     NUMBER OF SURFACES        0  NUMBER OF SUPPORTS      4
+
+           Using 64-bit analysis engine.
+ 
+           SOLVER USED IS THE IN-CORE ADVANCED MATH SOLVER
+ 
+   TOTAL      PRIMARY LOAD CASES =     2, TOTAL DEGREES OF FREEDOM =       4
+   TOTAL LOAD COMBINATION  CASES =     3  SO FAR.
+
+
+
+    67. UNIT CM KG
+    68. * --- PARAMETROS DE DISE O DE CONCRETO -- -
+    69. START CONCRETE DESIGN
+     STAAD PLANE                                              -- PAGE NO.    3
+    * --- INFORMACION DEL TRABAJO -- -          
+CONCRETE DESIGN
+    70. CODE ACI
+    71. * RECUBRIMIENTOS DE VIGA (2.5 CM)
+    72. CLB 2.5 ALL
+    73. CLT 2.5 ALL
+    74. CLS 2.5 ALL
+    75. * MATERIALES
+    76. FC 200 ALL
+    77. FYMAIN 4200 ALL
+    78. FYSEC 4200 ALL
+    79. * LIMITES DE VARILLAS
+    80. MINMAIN 13 ALL
+    81. MAXMAIN 16 ALL
+    82. TRACK 2 ALL
+    83. DESIGN BEAM ALL
+     STAAD PLANE                                              -- PAGE NO.    4
+    * --- INFORMACION DEL TRABAJO -- -          
+     STAAD PLANE                                              -- PAGE NO.    5
+    * --- INFORMACION DEL TRABAJO -- -          
+
+                       STAAD.PRO CONCRETE DESIGN - (ACI-318-14)   v2.0                
+                       ***********************************************
+
+Units:       , CM     (Unless Noted Otherwise)
+
+Member :      1
+
+DESIGN SUMMARY
+-----------------------------------------------------------------------------
+| Status         :   Pass         Type    : Beam            Length:  250.000 |
+| Critical Ratio :   0.711        Criteria: Flexure                          |
+| Critical Clause:   9.5.2                                                   |
+-----------------------------------------------------------------------------
+
+CROSS SECTION
+-------------------------------------------------------
+| Shape: Rectangular | Width:   30.00 | Depth:   25.00 |
+-------------------------------------------------------
+
+DESIGN INPUTS
+-------------------------------------------------------------------------
+| Concrete | Fc         200.000 |                     | Ec     0.214E+06 |
+| Steel    | Fy(main)  4200.000 | Fy(trans)  4200.000 | Es     0.204E+07 |
+| Cover    | Top          2.500 | Bottom        2.500 | Sides      2.500 |
+-------------------------------------------------------------------------
+
+Design Messages
+-------------------------------------------------------------------------
+
+   WARNINGS: DESIGN FOR MEMBER     1
+   ---------------------------------
+    1) Review shear min density/max spacing Cl 9.7.6.2.2                     
+
+CRITICAL STRENGTH RESULTS
+-----------------------------------------------------------------------
+| Category |    Demand     |  Min Capacity  |  Max Capacity  |  Ratio  |
+-----------------------------------------------------------------------
+| Axial    |          0.000|     -77115.986 |      19509.641 |   0.000 |
+| Flexure  |    -210441.848|    -295834.204 |     203709.798 |   0.711 |
+| Shear Y  |      -2556.767|      -3639.675 |       3639.675 |   0.702 |
+| Shear Z  |          0.000|          0.000 |          0.000 |   0.000 |
+| Torsion  |          0.000|          0.000 |          0.000 |   0.000 |
+-----------------------------------------------------------------------
+
+LONGITUDINAL BAR DETAILS AT CROSS SECTIONS
+---------------------------------------------------------------------------------
+| Distance | Position |  Ast-reqd  |  Ast-prov  | No(s)bars| Size | No of Layers |
+---------------------------------------------------------------------------------
+|    0.000 |     Top  |      0.897 |      2.581 |     2    |  13M |       1      |
+|          |  Bottom  |      0.732 |      2.581 |     2    |  13M |       1      |
+|   62.500 |     Top  |      0.897 |      2.581 |     2    |  13M |       1      |
+|          |  Bottom  |      2.195 |      2.581 |     2    |  13M |       1      |
+|  125.000 |     Top  |      0.897 |      2.581 |     2    |  13M |       1      |
+|          |  Bottom  |      2.195 |      2.581 |     2    |  13M |       1      |
+|  187.500 |     Top  |      2.195 |      2.581 |     2    |  13M |       1      |
+|          |  Bottom  |      2.195 |      2.581 |     2    |  13M |       1      |
+|  250.000 |     Top  |      2.692 |      3.871 |     3    |  13M |       1      |
+|          |  Bottom  |      0.732 |      2.581 |     2    |  13M |       1      |
+---------------------------------------------------------------------------------
+     STAAD PLANE                                              -- PAGE NO.    6
+    * --- INFORMACION DEL TRABAJO -- -          
+
+LONGITUDINAL BAR LAYOUT
+---------------------------------------------------------------------------
+|                |    Bars     |      Location     | Distance  |   Anchor  |
+|       Position | Nums | Size | Start  |   End    | From Face | Start End |
+---------------------------------------------------------------------------
+|            Top |    2 | 13M  |    0.00|   250.00 |     3.14  |  Yes  Yes |
+|            Top |    1 | 13M  |  214.14|   250.00 |     3.14  |   No  Yes |
+|         Bottom |    2 | 13M  |    0.00|   250.00 |     3.14  |  Yes  Yes |
+---------------------------------------------------------------------------
+
+TRANSVERSE BAR LAYOUT
+------------------------------------------------------------------------------------
+|                                |        Asv        |     Rebar Specification      |
+| Zone | Dir.|  From   |    To   |  Reqd.  |  Prov.  | Nums | Size | Spacing | Legs |
+------------------------------------------------------------------------------------
+|    1 |  Y  |    0.00 |    5.83 |  0.0117 |Infinity |    1 |  13M |   0.00  |   2  |
+|    1 |  Z  |    0.00 |    5.83 |  0.0117 |Infinity |    1 |  13M |   0.00  |   2  |
+|    2 |  Y  |    5.83 |  250.00 |  0.1258 |  0.1480 |   15 |  13M |  17.44  |   2  |
+|    2 |  Z  |    5.83 |  250.00 |  0.1258 |  0.1480 |   15 |  13M |  17.44  |   2  |
+------------------------------------------------------------------------------------
+
+------------------------ Member:     1 Design Ends ------------------------
+
+     STAAD PLANE                                              -- PAGE NO.    7
+    * --- INFORMACION DEL TRABAJO -- -          
+
+                       STAAD.PRO CONCRETE DESIGN - (ACI-318-14)   v2.0                
+                       ***********************************************
+
+Units:       , CM     (Unless Noted Otherwise)
+
+Member :      2
+
+DESIGN SUMMARY
+-----------------------------------------------------------------------------
+| Status         :   Pass         Type    : Beam            Length:  410.000 |
+| Critical Ratio :   0.820        Criteria: Flexure                          |
+| Critical Clause:   9.5.2                                                   |
+-----------------------------------------------------------------------------
+
+CROSS SECTION
+-------------------------------------------------------
+| Shape: Rectangular | Width:   15.00 | Depth:   50.00 |
+-------------------------------------------------------
+
+DESIGN INPUTS
+-------------------------------------------------------------------------
+| Concrete | Fc         200.000 |                     | Ec     0.214E+06 |
+| Steel    | Fy(main)  4200.000 | Fy(trans)  4200.000 | Es     0.204E+07 |
+| Cover    | Top          2.500 | Bottom        2.500 | Sides      2.500 |
+-------------------------------------------------------------------------
+
+CRITICAL STRENGTH RESULTS
+-----------------------------------------------------------------------
+| Category |    Demand     |  Min Capacity  |  Max Capacity  |  Ratio  |
+-----------------------------------------------------------------------
+| Axial    |          0.000|     -77115.986 |      19509.641 |   0.000 |
+| Flexure  |     358690.696|    -437390.105 |     437390.105 |   0.820 |
+| Shear Y  |      -5747.642|     -19910.430 |      19910.430 |   0.289 |
+| Shear Z  |          0.000|      -2344.022 |       2344.022 |   0.000 |
+| Torsion  |          0.000|          0.000 |          0.000 |   0.000 |
+-----------------------------------------------------------------------
+
+LONGITUDINAL BAR DETAILS AT CROSS SECTIONS
+---------------------------------------------------------------------------------
+| Distance | Position |  Ast-reqd  |  Ast-prov  | No(s)bars| Size | No of Layers |
+---------------------------------------------------------------------------------
+|    0.000 |     Top  |      2.353 |      2.581 |     2    |  13M |       1      |
+|          |  Bottom  |      0.784 |      2.581 |     2    |  13M |       1      |
+|  102.500 |     Top  |      2.353 |      2.581 |     2    |  13M |       1      |
+|          |  Bottom  |      2.353 |      2.581 |     2    |  13M |       1      |
+|  205.000 |     Top  |      2.353 |      2.581 |     2    |  13M |       1      |
+|          |  Bottom  |      2.353 |      2.581 |     2    |  13M |       1      |
+|  307.500 |     Top  |      2.353 |      2.581 |     2    |  13M |       1      |
+|          |  Bottom  |      2.353 |      2.581 |     2    |  13M |       1      |
+|  410.000 |     Top  |      2.353 |      2.581 |     2    |  13M |       1      |
+|          |  Bottom  |      0.784 |      2.581 |     2    |  13M |       1      |
+---------------------------------------------------------------------------------
+     STAAD PLANE                                              -- PAGE NO.    8
+    * --- INFORMACION DEL TRABAJO -- -          
+
+LONGITUDINAL BAR LAYOUT
+---------------------------------------------------------------------------
+|                |    Bars     |      Location     | Distance  |   Anchor  |
+|       Position | Nums | Size | Start  |   End    | From Face | Start End |
+---------------------------------------------------------------------------
+|         Bottom |    2 | 13M  |    0.00|   410.00 |     3.14  |  Yes  Yes |
+|            Top |    2 | 13M  |    0.00|   410.00 |     3.14  |  Yes  Yes |
+---------------------------------------------------------------------------
+
+TRANSVERSE BAR LAYOUT
+------------------------------------------------------------------------------------
+|                                |        Asv        |     Rebar Specification      |
+| Zone | Dir.|  From   |    To   |  Reqd.  |  Prov.  | Nums | Size | Spacing | Legs |
+------------------------------------------------------------------------------------
+|    1 |  Y  |    0.00 |  410.00 |  0.1846 |  0.2077 |   34 |  13M |  12.42  |   2  |
+|    1 |  Z  |    0.00 |  410.00 |  0.1846 |  0.2077 |   34 |  13M |  12.42  |   2  |
+------------------------------------------------------------------------------------
+
+------------------------ Member:     2 Design Ends ------------------------
+
+     STAAD PLANE                                              -- PAGE NO.    9
+    * --- INFORMACION DEL TRABAJO -- -          
+
+                       STAAD.PRO CONCRETE DESIGN - (ACI-318-14)   v2.0                
+                       ***********************************************
+
+Units:       , CM     (Unless Noted Otherwise)
+
+Member :      3
+
+DESIGN SUMMARY
+-----------------------------------------------------------------------------
+| Status         :   Pass         Type    : Beam            Length:  350.000 |
+| Critical Ratio :   0.801        Criteria: Flexure                          |
+| Critical Clause:   9.5.2                                                   |
+-----------------------------------------------------------------------------
+
+CROSS SECTION
+-------------------------------------------------------
+| Shape: Rectangular | Width:   30.00 | Depth:   25.00 |
+-------------------------------------------------------
+
+DESIGN INPUTS
+-------------------------------------------------------------------------
+| Concrete | Fc         200.000 |                     | Ec     0.214E+06 |
+| Steel    | Fy(main)  4200.000 | Fy(trans)  4200.000 | Es     0.204E+07 |
+| Cover    | Top          2.500 | Bottom        2.500 | Sides      2.500 |
+-------------------------------------------------------------------------
+
+Design Messages
+-------------------------------------------------------------------------
+
+   WARNINGS: DESIGN FOR MEMBER     3
+   ---------------------------------
+    1) Review shear min density/max spacing Cl 9.7.6.2.2                     
+
+CRITICAL STRENGTH RESULTS
+-----------------------------------------------------------------------
+| Category |    Demand     |  Min Capacity  |  Max Capacity  |  Ratio  |
+-----------------------------------------------------------------------
+| Axial    |          0.000|     -79819.981 |      24387.051 |   0.000 |
+| Flexure  |    -237109.430|    -295834.204 |     203709.798 |   0.801 |
+| Shear Y  |       2918.456|      -3641.448 |       3641.448 |   0.801 |
+| Shear Z  |          0.000|      -2514.119 |       2514.119 |   0.000 |
+| Torsion  |          0.000|          0.000 |          0.000 |   0.000 |
+-----------------------------------------------------------------------
+
+LONGITUDINAL BAR DETAILS AT CROSS SECTIONS
+---------------------------------------------------------------------------------
+| Distance | Position |  Ast-reqd  |  Ast-prov  | No(s)bars| Size | No of Layers |
+---------------------------------------------------------------------------------
+|    0.000 |     Top  |      3.054 |      3.871 |     3    |  13M |       1      |
+|          |  Bottom  |      0.732 |      2.581 |     2    |  13M |       1      |
+|   87.500 |     Top  |      2.195 |      2.581 |     2    |  13M |       1      |
+|          |  Bottom  |      2.195 |      2.581 |     2    |  13M |       1      |
+|  175.000 |     Top  |      1.018 |      2.581 |     2    |  13M |       1      |
+|          |  Bottom  |      2.195 |      2.581 |     2    |  13M |       1      |
+|  262.500 |     Top  |      1.018 |      2.581 |     2    |  13M |       1      |
+|          |  Bottom  |      2.195 |      2.581 |     2    |  13M |       1      |
+|  350.000 |     Top  |      1.018 |      2.581 |     2    |  13M |       1      |
+|          |  Bottom  |      0.732 |      2.581 |     2    |  13M |       1      |
+---------------------------------------------------------------------------------
+     STAAD PLANE                                              -- PAGE NO.   10
+    * --- INFORMACION DEL TRABAJO -- -          
+
+LONGITUDINAL BAR LAYOUT
+---------------------------------------------------------------------------
+|                |    Bars     |      Location     | Distance  |   Anchor  |
+|       Position | Nums | Size | Start  |   End    | From Face | Start End |
+---------------------------------------------------------------------------
+|         Bottom |    2 | 13M  |    0.00|   350.00 |     3.14  |  Yes  Yes |
+|            Top |    2 | 13M  |    0.00|   350.00 |     3.14  |  Yes  Yes |
+|            Top |    1 | 13M  |    0.00|    70.10 |     3.14  |  Yes   No |
+---------------------------------------------------------------------------
+
+TRANSVERSE BAR LAYOUT
+------------------------------------------------------------------------------------
+|                                |        Asv        |     Rebar Specification      |
+| Zone | Dir.|  From   |    To   |  Reqd.  |  Prov.  | Nums | Size | Spacing | Legs |
+------------------------------------------------------------------------------------
+|    1 |  Y  |    0.00 |  341.99 |  0.1258 |  0.1434 |   20 |  13M |  18.00  |   2  |
+|    1 |  Z  |    0.00 |  341.99 |  0.1258 |  0.1434 |   20 |  13M |  18.00  |   2  |
+|    2 |  Y  |  341.99 |  350.00 |  0.0115 |Infinity |    1 |  13M |   0.00  |   2  |
+|    2 |  Z  |  341.99 |  350.00 |  0.0115 |Infinity |    1 |  13M |   0.00  |   2  |
+------------------------------------------------------------------------------------
+
+------------------------ Member:     3 Design Ends ------------------------
+
+    84. CONCRETE TAKE
+    85. END CONCRETE DESIGN
+     STAAD PLANE                                              -- PAGE NO.   11
+    * --- INFORMACION DEL TRABAJO -- -          
+          **************  CONCRETE  TAKE OFF  **************
+                (FOR BEAMS, COLUMNS AND PLATES DESIGNED ABOVE)
+     NOTE: CONCRETE QUANTITY REPRESENTS VOLUME OF CONCRETE IN BEAMS, COLUMNS, AND PLATES DESIGNED ABOVE.
+           REINFORCING STEEL QUANTITY REPRESENTS REINFORCING STEEL IN BEAMS AND COLUMNS DESIGNED ABOVE.
+           REINFORCING STEEL IN PLATES IS NOT INCLUDED IN THE REPORTED QUANTITY.
+
+          TOTAL VOLUME OF CONCRETE =         0.8 CU.METER
+
+           BAR SIZE         WEIGHT 
+            NUMBER         (in New)
+           --------        --------
+               13        **********
+                       ------------
+             *** TOTAL= -2147483648
+
+    86. FINISH
+
+
+             *********** END OF THE STAAD.Pro RUN ***********         
+
+               **** DATE= DEC 16,2025   TIME= 19:18:53 ****
+
+         ************************************************************
+         *   For technical assistance on STAAD.Pro, please visit    *
+         *   http://www.bentley.com/en/support/                     *
+         *                                                          *
+         *   Details about additional assistance from               *
+         *   Bentley and Partners can be found at program menu      *
+         *   Help->Technical Support                                *
+         *                                                          *
+         *           Copyright (c) Bentley Systems, Inc.            *
+         *                http://www.bentley.com                    *
+         ************************************************************
+                                                                     
