@@ -84,13 +84,14 @@
                                 almaAlign almaX0
                                 rec_draw radFillet
                                 p1_st p2_st p1_st_BB p2_st_BB
+                                p1_st_BB_main p2_st_BB_main p1_st_BB_step p2_st_BB_step
                                 draw-break-line
                                 hasLosa typeLosa capaCompresion h_losa alignLosa yLosaStart
                                 bbCountBase bbCountInf bbCountSup
                                 yBBMin yBBMax yBBStep bbBranch
 
                                 ;; Ganchos
-                                rBarTop xStirrupLeft yStirrupTop offsetHookFactor centerBarX centerBarY pH1 pH2
+                                rBarTop xStirrupLeft yStirrupTop yStirrupBot offsetHookFactor centerBarX centerBarY pH1 pH2
 
                                 ;; Bastón crítico / steel layout
                                 critBastInf critBastSup
@@ -1720,18 +1721,36 @@
   ;; B-B: dibujar armado con la geometria B-B
   (if (= (length uniqueKeys) 2)
     (progn
-      ;; Estribo (igual V13 sobre B-B)
-      (setq p1_st_BB (list (+ xSecB rec_draw) (+ ySecB rec_draw)))
-      (setq p2_st_BB (list (- (+ xSecB bG_draw) rec_draw) (- (+ ySecB hG_draw) rec_draw)))
-      (command "_.RECTANG" "_F" radFillet p1_st_BB p2_st_BB)
+      (princ (strcat "\nB-B: estribos | alineacion=" alignChoice))
+
+      ;; Estribo principal (zona ancha)
+      (if isAlignInf
+        (progn
+          ;; zona ancha abajo
+          (setq p1_st_BB_main (list (+ xSecB rec_draw) (+ ySecB rec_draw)))
+          (setq p2_st_BB_main (list (- (+ xSecB bG_draw) rec_draw) (- (+ ySecB hS_draw) rec_draw)))
+        )
+        (progn
+          ;; zona ancha arriba
+          (setq p1_st_BB_main (list (+ xSecB rec_draw) (+ ySecB (- hG_draw hS_draw) rec_draw)))
+          (setq p2_st_BB_main (list (- (+ xSecB bG_draw) rec_draw) (- (+ ySecB hG_draw) rec_draw)))
+        )
+      )
+      (princ
+        (strcat
+          "\nB-B: estribo principal box p1=" (vl-princ-to-string p1_st_BB_main)
+          " p2=" (vl-princ-to-string p2_st_BB_main)
+        )
+      )
+      (command "_.RECTANG" "_F" radFillet p1_st_BB_main p2_st_BB_main)
       (command "_.CHPROP" (entlast) "" "Color" 3 "")
       (command "_.RECTANG" "_F" 0 (list 0 0) (list 0 0))
       (command "_.ERASE" (entlast) "")
 
-      ;; Ganchos 135 (igual V13, basado en varilla de cara plana como referencia visual)
+      ;; Gancho estribo principal (sup-izq)
       (setq rBarTop (/ (* (/ (obtener-diametro-real varPlan) 100.0) 7.0) 2.0))
-      (setq xStirrupLeft (car p1_st_BB))
-      (setq yStirrupTop (cadr p2_st_BB))
+      (setq xStirrupLeft (car p1_st_BB_main))
+      (setq yStirrupTop (cadr p2_st_BB_main))
       (setq offsetHookFactor (* rBarTop 1.1))
       (setq centerBarX (+ xStirrupLeft rBarTop))
       (setq pH1 (list (+ centerBarX offsetHookFactor) yStirrupTop))
@@ -1741,6 +1760,45 @@
       (setq pH2 (list xStirrupLeft (- centerBarY offsetHookFactor)))
       (command "_.LINE" pH2 (polar pH2 (* 315.0 (/ pi 180.0)) 0.30) "")
       (command "_.CHPROP" (entlast) "" "Color" 3 "")
+      (princ "\nB-B: gancho principal dibujado (sup-izq)")
+
+      ;; Estribo escalonado (zona peraltada)
+      (if isAlignInf
+        (progn
+          ;; zona peraltada arriba
+          (setq p1_st_BB_step (list (+ xSecB almaX0 rec_draw) (+ ySecB hS_draw rec_draw)))
+          (setq p2_st_BB_step (list (- (+ xSecB almaX0 bS_draw) rec_draw) (- (+ ySecB hG_draw) rec_draw)))
+        )
+        (progn
+          ;; zona peraltada abajo
+          (setq p1_st_BB_step (list (+ xSecB almaX0 rec_draw) (+ ySecB rec_draw)))
+          (setq p2_st_BB_step (list (- (+ xSecB almaX0 bS_draw) rec_draw) (- (+ ySecB (- hG_draw hS_draw)) rec_draw)))
+        )
+      )
+      (princ
+        (strcat
+          "\nB-B: estribo escalonado box p1=" (vl-princ-to-string p1_st_BB_step)
+          " p2=" (vl-princ-to-string p2_st_BB_step)
+        )
+      )
+      (command "_.RECTANG" "_F" radFillet p1_st_BB_step p2_st_BB_step)
+      (command "_.CHPROP" (entlast) "" "Color" 3 "")
+      (command "_.RECTANG" "_F" 0 (list 0 0) (list 0 0))
+      (command "_.ERASE" (entlast) "")
+
+      ;; Gancho estribo escalonado (inf-izq)
+      (setq xStirrupLeft (car p1_st_BB_step))
+      (setq yStirrupBot (cadr p1_st_BB_step))
+      (setq offsetHookFactor (* rBarTop 1.1))
+      (setq centerBarX (+ xStirrupLeft rBarTop))
+      (setq pH1 (list (+ centerBarX offsetHookFactor) yStirrupBot))
+      (command "_.LINE" pH1 (polar pH1 (* 45.0 (/ pi 180.0)) 0.30) "")
+      (command "_.CHPROP" (entlast) "" "Color" 3 "")
+      (setq centerBarY (+ yStirrupBot rBarTop))
+      (setq pH2 (list xStirrupLeft (+ centerBarY offsetHookFactor)))
+      (command "_.LINE" pH2 (polar pH2 (* 45.0 (/ pi 180.0)) 0.30) "")
+      (command "_.CHPROP" (entlast) "" "Color" 3 "")
+      (princ "\nB-B: gancho escalonado dibujado (inf-izq)")
 
       (setq bbCountBase (if (numberp numPlan) numPlan 0))
       (setq bbCountInf (if (numberp (cadr critBastInf)) (cadr critBastInf) 0))
@@ -1764,7 +1822,7 @@
         )
       )
 
-      (setq p1_st p1_st_BB p2_st p2_st_BB)
+      (setq p1_st p1_st_BB_main p2_st p2_st_BB_main)
       (process-layer-steel numPlan varPlan (cadr critBastInf) (car critBastInf) nil)
       (princ "\nOCMEMA: B-B acero process-layer-steel called (INF)")
       (process-layer-steel numPlan varPlan (cadr critBastSup) (car critBastSup) T)
