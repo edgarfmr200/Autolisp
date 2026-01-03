@@ -86,6 +86,7 @@
                                 p1_st p2_st
                                 draw-break-line
                                 hasLosa typeLosa capaCompresion h_losa alignLosa yLosaStart
+                                yBBMin yBBMax yBBStep bbBranch
 
                                 ;; Ganchos
                                 rBarTop xStirrupLeft yStirrupTop offsetHookFactor centerBarX centerBarY pH1 pH2
@@ -1510,17 +1511,43 @@
         (t (setq almaX0 (/ (- bG_draw bS_draw) 2.0)))
       )
 
-      ;; Dibujo concreto compuesto (T invertida): base (bG x hS) + alma (bS x (hG-hS))
-      (command "_.PLINE"
-               (list xSecB ySecB)
-               (list (+ xSecB bG_draw) ySecB)
-               (list (+ xSecB bG_draw) (+ ySecB hS_draw))
-               (list (+ xSecB almaX0 bS_draw) (+ ySecB hS_draw))
-               (list (+ xSecB almaX0 bS_draw) (+ ySecB hG_draw))
-               (list (+ xSecB almaX0) (+ ySecB hG_draw))
-               (list (+ xSecB almaX0) (+ ySecB hS_draw))
-               (list xSecB (+ ySecB hS_draw))
-               "_C")
+      (setq yBBMin ySecB)
+      (setq yBBMax (+ ySecB hG_draw))
+      (princ (strcat "\nB-B: alineacion=" alignChoice " | yMin=" (rtos yBBMin 2 3) " | yMax=" (rtos yBBMax 2 3)))
+
+      (if isAlignInf
+        (progn
+          (setq bbBranch "escalon-arriba")
+          (princ (strcat "\nB-B: rama=" bbBranch))
+          ;; Dibujo concreto compuesto (T invertida): base (bG x hS) + alma (bS x (hG-hS))
+          (command "_.PLINE"
+                   (list xSecB ySecB)
+                   (list (+ xSecB bG_draw) ySecB)
+                   (list (+ xSecB bG_draw) (+ ySecB hS_draw))
+                   (list (+ xSecB almaX0 bS_draw) (+ ySecB hS_draw))
+                   (list (+ xSecB almaX0 bS_draw) (+ ySecB hG_draw))
+                   (list (+ xSecB almaX0) (+ ySecB hG_draw))
+                   (list (+ xSecB almaX0) (+ ySecB hS_draw))
+                   (list xSecB (+ ySecB hS_draw))
+                   "_C")
+        )
+        (progn
+          (setq bbBranch "escalon-abajo")
+          (princ (strcat "\nB-B: rama=" bbBranch))
+          (setq yBBStep (+ ySecB (- hG_draw hS_draw)))
+          ;; Dibujo concreto compuesto (T normal): base (bG x hS) arriba + alma hacia abajo
+          (command "_.PLINE"
+                   (list xSecB (+ ySecB hG_draw))
+                   (list (+ xSecB bG_draw) (+ ySecB hG_draw))
+                   (list (+ xSecB bG_draw) yBBStep)
+                   (list (+ xSecB almaX0 bS_draw) yBBStep)
+                   (list (+ xSecB almaX0 bS_draw) ySecB)
+                   (list (+ xSecB almaX0) ySecB)
+                   (list (+ xSecB almaX0) yBBStep)
+                   (list xSecB yBBStep)
+                   "_C")
+        )
+      )
       (command "_.CHPROP" (entlast) "" "Color" 7 "")
     )
   )
@@ -1603,6 +1630,9 @@
   ;; ----------------------------------------------------------------------------
   ;; 13) Mostrar acero en sección (mantener lógica V13 simplificada)
   ;; ----------------------------------------------------------------------------
+  (defun ocmema--num-str (v) (if (numberp v) (rtos v 2 3) "nil"))
+  (defun ocmema--int-str (v) (if (numberp v) (itoa v) "nil"))
+  (defun ocmema--list-empty (lst) (if (and lst (> (length lst) 0)) "no" "si"))
   (defun get-critical-bast (bastList / critVar critNum maxD d)
      (setq critVar nil critNum 0 maxD 0.0)
      (foreach b bastList
@@ -1667,8 +1697,42 @@
   )
 
   ;; En sección A-A: se muestra acero plano + bastón crítico (aprox)
+  (princ
+    (strcat
+      "\nOCMEMA: A-A acero start | rutina=process-layer-steel"
+      " | barras_base=" (ocmema--int-str numPlan)
+      " | baston_inf=" (ocmema--int-str (cadr critBastInf))
+      " | baston_sup=" (ocmema--int-str (cadr critBastSup))
+      " | bG=" (ocmema--num-str bG_draw)
+      " | hG=" (ocmema--num-str hG_draw)
+      " | bS=" (ocmema--num-str bS_draw)
+      " | hS=" (ocmema--num-str hS_draw)
+      " | almaX0=" (ocmema--num-str almaX0)
+      " | bastonesInfVacia=" (ocmema--list-empty bastonesInfList)
+      " | bastonesSupVacia=" (ocmema--list-empty bastonesSupList)
+    )
+  )
   (process-layer-steel numPlan varPlan (cadr critBastInf) (car critBastInf) nil)
   (process-layer-steel numPlan varPlan (cadr critBastSup) (car critBastSup) T)
+  (princ "\nOCMEMA: A-A acero end | rutina=process-layer-steel")
+
+  ;; B-B: no se invoca armado en esta version; solo contorno.
+  (princ
+    (strcat
+      "\nOCMEMA: B-B acero start | rutina=none (solo contorno)"
+      " | barras_base=" (ocmema--int-str numPlan)
+      " | baston_inf=" (ocmema--int-str (cadr critBastInf))
+      " | baston_sup=" (ocmema--int-str (cadr critBastSup))
+      " | bG=" (ocmema--num-str bG_draw)
+      " | hG=" (ocmema--num-str hG_draw)
+      " | bS=" (ocmema--num-str bS_draw)
+      " | hS=" (ocmema--num-str hS_draw)
+      " | almaX0=" (ocmema--num-str almaX0)
+      " | bastonesInfVacia=" (ocmema--list-empty bastonesInfList)
+      " | bastonesSupVacia=" (ocmema--list-empty bastonesSupList)
+    )
+  )
+  (princ "\nOCMEMA: B-B acero end | rutina=none (skipped)")
 
   ;; ----------------------------------------------------------------------------
   ;; 14) Restore vars
@@ -1683,4 +1747,3 @@
   (princ "\nDibujo de Trabe (V_FINAL) completado.")
   (princ)
 )
-
