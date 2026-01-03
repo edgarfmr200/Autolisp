@@ -1762,17 +1762,17 @@
       (command "_.CHPROP" (entlast) "" "Color" 3 "")
       (princ "\nB-B: gancho principal dibujado (sup-izq)")
 
-      ;; Estribo escalonado (zona peraltada)
+      ;; Estribo escalonado (zona peraltada): rectangulo completo (bS_draw x hS_draw)
       (if isAlignInf
         (progn
-          ;; zona peraltada arriba
-          (setq p1_st_BB_step (list (+ xSecB almaX0 rec_draw) (+ ySecB hS_draw rec_draw)))
-          (setq p2_st_BB_step (list (- (+ xSecB almaX0 bS_draw) rec_draw) (- (+ ySecB hG_draw) rec_draw)))
+          ;; zona ancha abajo: estribo escalonado cruza dentro de la zona ancha
+          (setq p1_st_BB_step (list (+ xSecB almaX0 rec_draw) (+ ySecB rec_draw)))
+          (setq p2_st_BB_step (list (- (+ xSecB almaX0 bS_draw) rec_draw) (- (+ ySecB hS_draw) rec_draw)))
         )
         (progn
-          ;; zona peraltada abajo
-          (setq p1_st_BB_step (list (+ xSecB almaX0 rec_draw) (+ ySecB rec_draw)))
-          (setq p2_st_BB_step (list (- (+ xSecB almaX0 bS_draw) rec_draw) (- (+ ySecB (- hG_draw hS_draw)) rec_draw)))
+          ;; zona ancha arriba: estribo escalonado cruza dentro de la zona ancha
+          (setq p1_st_BB_step (list (+ xSecB almaX0 rec_draw) (+ ySecB (- hG_draw hS_draw) rec_draw)))
+          (setq p2_st_BB_step (list (- (+ xSecB almaX0 bS_draw) rec_draw) (- (+ ySecB hG_draw) rec_draw)))
         )
       )
       (princ
