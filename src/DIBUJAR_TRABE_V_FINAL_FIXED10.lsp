@@ -83,9 +83,10 @@
                                 bG_draw bS_draw hG_draw hS_draw
                                 almaAlign almaX0
                                 rec_draw radFillet
-                                p1_st p2_st
+                                p1_st p2_st p1_st_BB p2_st_BB
                                 draw-break-line
                                 hasLosa typeLosa capaCompresion h_losa alignLosa yLosaStart
+                                bbCountBase bbCountInf bbCountSup
                                 yBBMin yBBMax yBBStep bbBranch
 
                                 ;; Ganchos
@@ -1716,23 +1717,61 @@
   (process-layer-steel numPlan varPlan (cadr critBastSup) (car critBastSup) T)
   (princ "\nOCMEMA: A-A acero end | rutina=process-layer-steel")
 
-  ;; B-B: no se invoca armado en esta version; solo contorno.
-  (princ
-    (strcat
-      "\nOCMEMA: B-B acero start | rutina=none (solo contorno)"
-      " | barras_base=" (ocmema--int-str numPlan)
-      " | baston_inf=" (ocmema--int-str (cadr critBastInf))
-      " | baston_sup=" (ocmema--int-str (cadr critBastSup))
-      " | bG=" (ocmema--num-str bG_draw)
-      " | hG=" (ocmema--num-str hG_draw)
-      " | bS=" (ocmema--num-str bS_draw)
-      " | hS=" (ocmema--num-str hS_draw)
-      " | almaX0=" (ocmema--num-str almaX0)
-      " | bastonesInfVacia=" (ocmema--list-empty bastonesInfList)
-      " | bastonesSupVacia=" (ocmema--list-empty bastonesSupList)
+  ;; B-B: dibujar armado con la geometria B-B
+  (if (= (length uniqueKeys) 2)
+    (progn
+      ;; Estribo (igual V13 sobre B-B)
+      (setq p1_st_BB (list (+ xSecB rec_draw) (+ ySecB rec_draw)))
+      (setq p2_st_BB (list (- (+ xSecB bG_draw) rec_draw) (- (+ ySecB hG_draw) rec_draw)))
+      (command "_.RECTANG" "_F" radFillet p1_st_BB p2_st_BB)
+      (command "_.CHPROP" (entlast) "" "Color" 3 "")
+      (command "_.RECTANG" "_F" 0 (list 0 0) (list 0 0))
+      (command "_.ERASE" (entlast) "")
+
+      ;; Ganchos 135 (igual V13, basado en varilla de cara plana como referencia visual)
+      (setq rBarTop (/ (* (/ (obtener-diametro-real varPlan) 100.0) 7.0) 2.0))
+      (setq xStirrupLeft (car p1_st_BB))
+      (setq yStirrupTop (cadr p2_st_BB))
+      (setq offsetHookFactor (* rBarTop 1.1))
+      (setq centerBarX (+ xStirrupLeft rBarTop))
+      (setq pH1 (list (+ centerBarX offsetHookFactor) yStirrupTop))
+      (command "_.LINE" pH1 (polar pH1 (* 315.0 (/ pi 180.0)) 0.30) "")
+      (command "_.CHPROP" (entlast) "" "Color" 3 "")
+      (setq centerBarY (- yStirrupTop rBarTop))
+      (setq pH2 (list xStirrupLeft (- centerBarY offsetHookFactor)))
+      (command "_.LINE" pH2 (polar pH2 (* 315.0 (/ pi 180.0)) 0.30) "")
+      (command "_.CHPROP" (entlast) "" "Color" 3 "")
+
+      (setq bbCountBase (if (numberp numPlan) numPlan 0))
+      (setq bbCountInf (if (numberp (cadr critBastInf)) (cadr critBastInf) 0))
+      (setq bbCountSup (if (numberp (cadr critBastSup)) (cadr critBastSup) 0))
+
+      (princ
+        (strcat
+          "\nOCMEMA: B-B acero start | rutina=process-layer-steel"
+          " | barras_base=" (ocmema--int-str numPlan)
+          " | baston_inf=" (ocmema--int-str (cadr critBastInf))
+          " | baston_sup=" (ocmema--int-str (cadr critBastSup))
+          " | conteo_inf=" (itoa (+ bbCountBase bbCountInf))
+          " | conteo_sup=" (itoa (+ bbCountBase bbCountSup))
+          " | bG=" (ocmema--num-str bG_draw)
+          " | hG=" (ocmema--num-str hG_draw)
+          " | bS=" (ocmema--num-str bS_draw)
+          " | hS=" (ocmema--num-str hS_draw)
+          " | almaX0=" (ocmema--num-str almaX0)
+          " | bastonesInfVacia=" (ocmema--list-empty bastonesInfList)
+          " | bastonesSupVacia=" (ocmema--list-empty bastonesSupList)
+        )
+      )
+
+      (setq p1_st p1_st_BB p2_st p2_st_BB)
+      (process-layer-steel numPlan varPlan (cadr critBastInf) (car critBastInf) nil)
+      (princ "\nOCMEMA: B-B acero process-layer-steel called (INF)")
+      (process-layer-steel numPlan varPlan (cadr critBastSup) (car critBastSup) T)
+      (princ "\nOCMEMA: B-B acero process-layer-steel called (SUP)")
+      (princ "\nOCMEMA: B-B acero end | rutina=process-layer-steel")
     )
   )
-  (princ "\nOCMEMA: B-B acero end | rutina=none (skipped)")
 
   ;; ----------------------------------------------------------------------------
   ;; 14) Restore vars
