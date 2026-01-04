@@ -70,6 +70,8 @@
                                 axis_near_start axis_near_end
                                 strVarBast areaBastOne qtyBastRec numBast
                                 bastonesInfList bastonesSupList
+                                bastonesWideInfList bastonesWideSupList
+                                bastonesStepInfList bastonesStepSupList
                                 baseAreaThisFace
 
                                 ;; Estribos / contraflecha
@@ -97,12 +99,17 @@
                                 bb-x-inner-left-step bb-x-inner-right-step
                                 bb-x-anchor bb-x-anchor-l bb-x-anchor-r
                                 stepIsTop numPlan_step varPlan_step
+                                baseNum_wide_inf baseVar_wide_inf bastNum_wide_inf bastVar_wide_inf
+                                baseNum_wide_sup baseVar_wide_sup bastNum_wide_sup bastVar_wide_sup
+                                baseNum_step baseVar_step bastNum_step bastVar_step
 
                                 ;; Ganchos
                                 rBarTop xStirrupLeft yStirrupTop yStirrupBot offsetHookFactor centerBarX centerBarY pH1 pH2
 
                                 ;; Bastón crítico / steel layout
                                 critBastInf critBastSup
+                                critBastWideInf critBastWideSup
+                                critBastStepInf critBastStepSup
                                 process-layer-steel get-critical-bast
 
                                 ;; Restore vars
@@ -1185,6 +1192,10 @@
   ;; ----------------------------------------------------------------------------
   (setq bastonesInfList '())
   (setq bastonesSupList '())
+  (setq bastonesWideInfList '())
+  (setq bastonesWideSupList '())
+  (setq bastonesStepInfList '())
+  (setq bastonesStepSupList '())
 
   ;; Helper: dibujar bastones por tramo (baseArea puede variar por tramo)
   (defun _steel-sublist-in-range (lst x1_m x2_m / out)
@@ -1323,6 +1334,13 @@
 
               (dibujar-leader-blindado (list (/ (+ x_baston_ini x_baston_fin) 2.0) (+ yBaseFace 0.15)) (strcat (itoa numBast) "#" strVarBast) nil nil)
               (setq bastonesInfList (append bastonesInfList (list (list strVarBast numBast))))
+              (if planoIsBottom
+                (setq bastonesWideInfList (append bastonesWideInfList (list (list strVarBast numBast))))
+                (if (and (= (length uniqueKeys) 2) (= t_key keyDeep))
+                  (setq bastonesStepInfList (append bastonesStepInfList (list (list strVarBast numBast))))
+                  (setq bastonesWideInfList (append bastonesWideInfList (list (list strVarBast numBast))))
+                )
+              )
                 )
               )
 
@@ -1424,6 +1442,13 @@
 
               (dibujar-leader-blindado (list (/ (+ x_baston_ini x_baston_fin) 2.0) (- yBaseFace 0.15)) (strcat (itoa numBast) "#" strVarBast) T nil)
               (setq bastonesSupList (append bastonesSupList (list (list strVarBast numBast))))
+              (if (not planoIsBottom)
+                (setq bastonesWideSupList (append bastonesWideSupList (list (list strVarBast numBast))))
+                (if (and (= (length uniqueKeys) 2) (= t_key keyDeep))
+                  (setq bastonesStepSupList (append bastonesStepSupList (list (list strVarBast numBast))))
+                  (setq bastonesWideSupList (append bastonesWideSupList (list (list strVarBast numBast))))
+                )
+              )
                 )
               )
 
@@ -1818,10 +1843,14 @@
 
   (setq critBastInf (get-critical-bast bastonesInfList))
   (setq critBastSup (get-critical-bast bastonesSupList))
+  (setq critBastWideInf (get-critical-bast bastonesWideInfList))
+  (setq critBastWideSup (get-critical-bast bastonesWideSupList))
+  (setq critBastStepInf (get-critical-bast bastonesStepInfList))
+  (setq critBastStepSup (get-critical-bast bastonesStepSupList))
 
   (defun process-layer-steel (baseNum baseVar bastNum bastVar isTop / diamBase diamBast yStart dir layoutMode w gap i cx cy totalBars
                                                                xL xR xC xStepL xStepR xAnchor xAnchorL xAnchorR
-                                                               positions remaining nStep nWide bestPos bestGap
+                                                               positions positionsPts remaining nStep nWide bestPos bestGap xVal
                                                                nOBase nInner reqAnchors nO nC ly extraLeft extraRight
                                                                levelsIzq levelsDer levelsCen levelsCenR
                                                                ocmema--segment-pos ocmema--max-gap ocmema--merge-unique
@@ -1830,6 +1859,8 @@
      (setq diamBase (* (/ (obtener-diametro-real baseVar) 100.0) 7.0))
      (setq diamBast 0.0)
      (if bastVar (setq diamBast (* (/ (obtener-diametro-real bastVar) 100.0) 7.0)))
+     (if (null bastVar) (setq bastNum 0))
+     (if (null bastNum) (setq bastNum 0))
      (setq yStart (if isTop (- (cadr p2_st) (/ diamBase 2.0)) (+ (cadr p1_st) (/ diamBase 2.0))))
      (setq dir (if isTop -1.0 1.0))
      (initget "Orillas Largo")
@@ -2158,10 +2189,18 @@
 
          (ocmema--draw-xlist positions yStart)
 
-         (if (and bastVar (> bastNum 0))
+         (if (> bastNum 0)
            (progn
-             (setq nO (ocmema--clamp-int (getint (strcat "\n  Cuantos BASTONES van en orillas (Total) (0-" (itoa bastNum) ")?: ")) 0 bastNum))
+             (princ
+               (strcat
+                 "\nDBG Bastones: capa=" (if isTop "SUP" "INF")
+                 " bastNum=" (itoa bastNum)
+                 " bastVar=" (if bastVar (vl-princ-to-string bastVar) "nil")
+               )
+             )
+             (setq nO (ocmema--clamp-int (getint (strcat "\nBastones (" (if isTop "SUP" "INF") "): tienes " (itoa bastNum) ". Cuantos van en orillas (Total) (0-" (itoa bastNum) ")?: ")) 0 bastNum))
              (setq nC (- bastNum nO))
+             (princ (strcat "\nDBG Bastones: nO=" (itoa nO) " nC=" (itoa nC)))
              (setq levelsIzq (ocmema--count-near positions xL eps))
              (setq levelsDer (ocmema--count-near positions xR eps))
              (if (= bb-align "Centro")
@@ -2255,10 +2294,18 @@
              )
              (ocmema--draw-xlist positions yStart)
 
-             (if (and bastVar (> bastNum 0))
+             (if (> bastNum 0)
                (progn
-                 (setq nO (ocmema--clamp-int (getint (strcat "\n  Cuantos BASTONES van en orillas (Total) (0-" (itoa bastNum) ")?: ")) 0 bastNum))
+                 (princ
+                   (strcat
+                     "\nDBG Bastones: capa=" (if isTop "SUP" "INF")
+                     " bastNum=" (itoa bastNum)
+                     " bastVar=" (if bastVar (vl-princ-to-string bastVar) "nil")
+                   )
+                 )
+                 (setq nO (ocmema--clamp-int (getint (strcat "\nBastones (" (if isTop "SUP" "INF") "): tienes " (itoa bastNum) ". Cuantos van en orillas (Total) (0-" (itoa bastNum) ")?: ")) 0 bastNum))
                  (setq nC (- bastNum nO))
+                 (princ (strcat "\nDBG Bastones: nO=" (itoa nO) " nC=" (itoa nC)))
                  (setq levelsIzq (ocmema--count-near positions xL eps))
                  (setq levelsDer (ocmema--count-near positions xR eps))
                  (setq levelsCen (ocmema--count-near positions xC eps))
@@ -2318,12 +2365,17 @@
                )
              )
              (setq positions nil)
+             (setq positionsPts nil)
              (if (>= baseNum 2)
                (progn
                  (setq positions (append positions (list xL xR)))
+                 (setq positionsPts (append positionsPts (list (list xL yStart) (list xR yStart))))
                  (setq levelsIzq 1 levelsDer 1)
                )
-               (setq positions (append positions (list (/ (+ xL xR) 2.0))))
+               (progn
+                 (setq positions (append positions (list (/ (+ xL xR) 2.0))))
+                 (setq positionsPts (append positionsPts (list (list (/ (+ xL xR) 2.0) yStart))))
+               )
              )
              (if (> nOBase 2)
                (progn
@@ -2331,14 +2383,16 @@
                  (setq extraRight (fix (/ (- nOBase 2) 2)))
                  (setq i 0)
                  (repeat extraLeft
-                   (setq levelsIzq (1+ levelsIzq))
                    (setq positions (append positions (list xL)))
+                   (setq positionsPts (append positionsPts (list (list xL (+ yStart (* levelsIzq diamBase dir))))))
+                   (setq levelsIzq (1+ levelsIzq))
                    (setq i (1+ i))
                  )
                  (setq i 0)
                  (repeat extraRight
-                   (setq levelsDer (1+ levelsDer))
                    (setq positions (append positions (list xR)))
+                   (setq positionsPts (append positionsPts (list (list xR (+ yStart (* levelsDer diamBase dir))))))
+                   (setq levelsDer (1+ levelsDer))
                    (setq i (1+ i))
                  )
                )
@@ -2347,8 +2401,14 @@
              (if (> nInner 0)
                (progn
                  (if (= nInner 1)
-                   (setq positions (append positions (list (/ (+ xL xR) 2.0))))
-                   (setq positions (append positions (ocmema--segment-pos xL xR nInner)))
+                   (progn
+                     (setq positions (append positions (list (/ (+ xL xR) 2.0))))
+                     (setq positionsPts (append positionsPts (list (list (/ (+ xL xR) 2.0) yStart))))
+                   )
+                   (foreach xVal (ocmema--segment-pos xL xR nInner)
+                     (setq positions (append positions (list xVal)))
+                     (setq positionsPts (append positionsPts (list (list xVal yStart))))
+                   )
                  )
                )
              )
@@ -2360,11 +2420,19 @@
                  " | first=" (ocmema--str-val (car positions))
                )
              )
-             (ocmema--draw-xlist positions yStart)
-             (if (and bastVar (> bastNum 0))
+             (ocmema--draw-xlist positionsPts yStart)
+             (if (> bastNum 0)
                (progn
-                 (setq nO (ocmema--clamp-int (getint (strcat "\n  Cuantos BASTONES van en orillas (Total) (0-" (itoa bastNum) ")?: ")) 0 bastNum))
+                 (princ
+                   (strcat
+                     "\nDBG Bastones: capa=" (if isTop "SUP" "INF")
+                     " bastNum=" (itoa bastNum)
+                     " bastVar=" (if bastVar (vl-princ-to-string bastVar) "nil")
+                   )
+                 )
+                 (setq nO (ocmema--clamp-int (getint (strcat "\nBastones (" (if isTop "SUP" "INF") "): tienes " (itoa bastNum) ". Cuantos van en orillas (Total) (0-" (itoa bastNum) ")?: ")) 0 bastNum))
                  (setq nC (- bastNum nO))
+                 (princ (strcat "\nDBG Bastones: nO=" (itoa nO) " nC=" (itoa nC)))
                  (setq levelsIzq (ocmema--count-near positions xL eps))
                  (setq levelsDer (ocmema--count-near positions xR eps))
                  (setq levelsCen (ocmema--count-near positions xC eps))
@@ -2448,8 +2516,28 @@
     )
     (setq bb-use-anchor nil)
   )
-  (process-layer-steel numPlan varPlan (cadr critBastInf) (car critBastInf) nil)
-  (process-layer-steel numPlan varPlan (cadr critBastSup) (car critBastSup) T)
+  (setq baseNum_wide_inf numPlan)
+  (setq baseVar_wide_inf varPlan)
+  (setq bastNum_wide_inf (cadr critBastWideInf))
+  (setq bastVar_wide_inf (car critBastWideInf))
+  (setq baseNum_wide_sup numPlan)
+  (setq baseVar_wide_sup varPlan)
+  (setq bastNum_wide_sup (cadr critBastWideSup))
+  (setq bastVar_wide_sup (car critBastWideSup))
+  (princ
+    (strcat
+      "\nDBG PACK: WIDE-INF baseNum=" (if (numberp baseNum_wide_inf) (itoa baseNum_wide_inf) "nil")
+      " bastNum=" (if (numberp bastNum_wide_inf) (itoa bastNum_wide_inf) "nil")
+    )
+  )
+  (process-layer-steel baseNum_wide_inf baseVar_wide_inf bastNum_wide_inf bastVar_wide_inf nil)
+  (princ
+    (strcat
+      "\nDBG PACK: WIDE-SUP baseNum=" (if (numberp baseNum_wide_sup) (itoa baseNum_wide_sup) "nil")
+      " bastNum=" (if (numberp bastNum_wide_sup) (itoa bastNum_wide_sup) "nil")
+    )
+  )
+  (process-layer-steel baseNum_wide_sup baseVar_wide_sup bastNum_wide_sup bastVar_wide_sup T)
   (princ "\nOCMEMA: A-A acero end | rutina=process-layer-steel")
 
   ;; B-B: dibujar armado con la geometria B-B
@@ -2609,9 +2697,21 @@
           " | p2=(" (rtos (car p2_st) 2 3) "," (rtos (cadr p2_st) 2 3) ")"
         )
       )
-      (process-layer-steel numPlan varPlan (cadr critBastInf) (car critBastInf) nil)
+      (princ
+        (strcat
+          "\nDBG PACK: WIDE-INF baseNum=" (if (numberp baseNum_wide_inf) (itoa baseNum_wide_inf) "nil")
+          " bastNum=" (if (numberp bastNum_wide_inf) (itoa bastNum_wide_inf) "nil")
+        )
+      )
+      (process-layer-steel baseNum_wide_inf baseVar_wide_inf bastNum_wide_inf bastVar_wide_inf nil)
       (princ "\nOCMEMA: B-B acero WIDE process-layer-steel called (INF)")
-      (process-layer-steel numPlan varPlan (cadr critBastSup) (car critBastSup) T)
+      (princ
+        (strcat
+          "\nDBG PACK: WIDE-SUP baseNum=" (if (numberp baseNum_wide_sup) (itoa baseNum_wide_sup) "nil")
+          " bastNum=" (if (numberp bastNum_wide_sup) (itoa bastNum_wide_sup) "nil")
+        )
+      )
+      (process-layer-steel baseNum_wide_sup baseVar_wide_sup bastNum_wide_sup bastVar_wide_sup T)
       (princ "\nOCMEMA: B-B acero WIDE process-layer-steel called (SUP)")
       (princ "\nOCMEMA: B-B acero WIDE end | rutina=process-layer-steel")
 
@@ -2619,6 +2719,18 @@
       (setq stepIsTop (= bbBranch "escalon-arriba"))
       (setq numPlan_step (if (numberp numDeep) numDeep 0))
       (setq varPlan_step varDeep)
+      (setq baseNum_step numPlan_step)
+      (setq baseVar_step varPlan_step)
+      (if stepIsTop
+        (progn
+          (setq bastNum_step (cadr critBastStepSup))
+          (setq bastVar_step (car critBastStepSup))
+        )
+        (progn
+          (setq bastNum_step (cadr critBastStepInf))
+          (setq bastVar_step (car critBastStepInf))
+        )
+      )
       (princ
         (strcat
           "\nOCMEMA: B-B step steel | rama=" bbBranch
@@ -2632,7 +2744,14 @@
       (if (and varPlan_step (numberp numPlan_step) (> numPlan_step 0))
         (progn
           (setq bb-use-anchor nil)
-          (process-layer-steel numPlan_step varPlan_step 0 nil stepIsTop)
+          (princ
+            (strcat
+              "\nDBG PACK: STEP stepIsTop=" (if stepIsTop "T" "nil")
+              " baseNum=" (if (numberp baseNum_step) (itoa baseNum_step) "nil")
+              " bastNum=" (if (numberp bastNum_step) (itoa bastNum_step) "nil")
+            )
+          )
+          (process-layer-steel baseNum_step baseVar_step bastNum_step bastVar_step stepIsTop)
           (princ "\nOCMEMA: B-B acero STEP process-layer-steel called")
           (setq bb-use-anchor T)
         )
