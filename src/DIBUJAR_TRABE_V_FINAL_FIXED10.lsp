@@ -1709,6 +1709,7 @@
      )
      (defun ocmema--sort-num (lst / out x)
        (setq out nil)
+       (setq lst (ocmema--as-list lst))
        (foreach x lst
          (setq out (ocmema--sort-insert out x))
        )
@@ -1721,16 +1722,17 @@
            (setq gap (/ (- b a) (+ n 1.0)))
            (setq j 1)
            (repeat n
-             (setq out (append out (list (+ a (* j gap)))))
+             (setq out (cons (+ a (* j gap)) out))
              (setq j (1+ j))
            )
+           (setq out (reverse out))
          )
        )
        out
      )
      (defun ocmema--max-gap (lst / s prev maxg)
        (setq maxg 0.0)
-       (setq s (ocmema--sort-num lst))
+       (setq s (ocmema--sort-num (ocmema--as-list lst)))
        (if (> (length s) 1)
          (progn
            (setq prev (car s))
@@ -1742,12 +1744,30 @@
        )
        maxg
      )
-     (defun ocmema--merge-unique (lst tol / s out prev)
-       (setq s (ocmema--sort-num lst))
-       (setq out nil)
+     (defun ocmema--merge-unique (lst tol / s out prev v)
+       (setq s (ocmema--sort-num (ocmema--as-list lst)))
+       (princ
+         (strcat
+           "\nDBG: merge-unique IN | is-list=" (if (listp s) "T" "nil")
+           " | len=" (if (listp s) (itoa (length s)) "nil")
+           " | first=" (if (and (listp s) (> (length s) 0)) (ocmema--str-val (car s)) "nil")
+         )
+       )
+       (setq out nil prev nil)
        (foreach v s
-         (if (or (null out) (> (abs (- v (car (last out)))) tol))
-           (setq out (append out (list v)))
+         (if (or (null prev) (> (abs (- v prev)) tol))
+           (progn
+             (setq out (cons v out))
+             (setq prev v)
+           )
+         )
+       )
+       (setq out (reverse out))
+       (princ
+         (strcat
+           "\nDBG: merge-unique OUT | is-list=" (if (listp out) "T" "nil")
+           " | len=" (if (listp out) (itoa (length out)) "nil")
+           " | first=" (if (and (listp out) (> (length out) 0)) (ocmema--str-val (car out)) "nil")
          )
        )
        out
@@ -1909,7 +1929,15 @@
                  (if (>= baseNum 3) (setq positions (append positions (list xAnchor))))
                )
              )
+             (princ
+               (strcat
+                 "\nDBG: B-B pre-merge | is-list=" (if (listp positions) "T" "nil")
+                 " | len=" (if (listp positions) (itoa (length positions)) "nil")
+                 " | first=" (if (and (listp positions) (> (length positions) 0)) (ocmema--str-val (car positions)) "nil")
+               )
+             )
              (setq positions (ocmema--merge-unique positions eps))
+             (setq positions (ocmema--as-list positions))
              (setq remaining (- nInner reqAnchors))
              (if (> remaining 0)
                (progn
