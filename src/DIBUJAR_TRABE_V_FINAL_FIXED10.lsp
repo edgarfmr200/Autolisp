@@ -89,7 +89,7 @@
                                 hasLosa typeLosa typeLosaAA typeLosaBB capaCompresion h_losa alignLosa
                                 losaExt sep_base sep_extra hasAnyLosa yLosaStartAA yLosaStartBB
                                 yTopBB yBotBB yWide0_A yWide1_A yWide0_B yWide1_B
-                                ySlab0 ySlab1 ySlab0B ySlab1B ySlabMid yTopA yTopB
+                                ySlab0 ySlab1 ySlab0B ySlab1B ySlabMid yTopA yTopB yTopGlobal yTextAA yTextBB
                                 bbCountBase bbCountInf bbCountSup
                                 yBBMin yBBMax yBBStep bbBranch
                                 bb-use-anchor bb-align
@@ -1624,21 +1624,9 @@
       )
     )
   )
-  (setq yTopGlobal yWide1_A)
-  (if (numberp yWide1_B) (if (> yWide1_B yTopGlobal) (setq yTopGlobal yWide1_B)))
   (setq offsetText 0.6)
   (setq xCenterA (+ xSec (/ bG_draw 2.0)))
-  (setq yTextAA (+ yTopGlobal offsetText))
-  (command "_.TEXT" "_J" "_MC" (list xCenterA yTextAA) 0.18 0 "A-A")
-  (command "_.CHPROP" (entlast) "" "Color" 4 "")
-  (if (= (length uniqueKeys) 2)
-    (progn
-      (setq xCenterB (+ xSecB (/ bG_draw 2.0)))
-      (setq yTextBB (+ yTopGlobal offsetText))
-      (command "_.TEXT" "_J" "_MC" (list xCenterB yTextBB) 0.18 0 "B-B")
-      (command "_.CHPROP" (entlast) "" "Color" 4 "")
-    )
-  )
+  (if (= (length uniqueKeys) 2) (setq xCenterB (+ xSecB (/ bG_draw 2.0))))
   (setq yTopA yWide1_A)
   (setq yTopB yWide1_B)
   (princ
@@ -1760,6 +1748,15 @@
   (setq pH2 (list xStirrupLeft (- centerBarY offsetHookFactor)))
   (command "_.LINE" pH2 (polar pH2 (* 315.0 (/ pi 180.0)) 0.30) "")
   (command "_.CHPROP" (entlast) "" "Color" 3 "")
+
+  (if (= (length uniqueKeys) 1)
+    (progn
+      (setq yTopGlobal yWide1_A)
+      (setq yTextAA (+ yTopGlobal offsetText))
+      (command "_.TEXT" "_J" "_MC" (list xCenterA yTextAA) 0.18 0 "A-A")
+      (command "_.CHPROP" (entlast) "" "Color" 4 "")
+    )
+  )
 
   ;; ----------------------------------------------------------------------------
   ;; 13) Mostrar acero en sección (mantener lógica V13 simplificada)
@@ -1928,7 +1925,7 @@
        )
        out
      )
-     (defun ocmema--draw-xlist (xlist y / isNumList isPtList pts firstPt)
+    (defun ocmema--draw-xlist (xlist y / isNumList isPtList pts firstPt)
        (setq isNumList (and (listp xlist) (numberp (car xlist))))
        (setq isPtList (and (listp xlist) (listp (car xlist)) (= (length (car xlist)) 2)))
        (princ
@@ -1946,9 +1943,17 @@
            (command "_.DONUT" 0.0 diamBase p "")
            (command "_.CHPROP" (entlast) "" "Color" 5 "")
          )
-       )
-     )
-     (setq eps 1e-4)
+      )
+    )
+    (defun ocmema--clamp-int (v lo hi)
+      (cond
+        ((null v) lo)
+        ((< v lo) lo)
+        ((> v hi) hi)
+        (t v)
+      )
+    )
+    (setq eps 1e-4)
 
      (if bb-use-anchor
        (progn
@@ -2115,10 +2120,7 @@
 
          (if (and bastVar (> bastNum 0))
            (progn
-             (setq nO (getint (strcat "\n  Cuantos BASTONES van en orillas (Total) (0-" (itoa bastNum) ")?: ")))
-             (if (null nO) (setq nO 0))
-             (if (< nO 0) (setq nO 0))
-             (if (> nO bastNum) (setq nO bastNum))
+             (setq nO (ocmema--clamp-int (getint (strcat "\n  Cuantos BASTONES van en orillas (Total) (0-" (itoa bastNum) ")?: ")) 0 bastNum))
              (setq nC (- bastNum nO))
              (setq levelsIzq (ocmema--count-near positions xL eps))
              (setq levelsDer (ocmema--count-near positions xR eps))
@@ -2186,7 +2188,7 @@
            (progn
              (setq xL (+ (car p1_st) (/ diamBase 2.0)))
              (setq xR (- (car p2_st) (/ diamBase 2.0)))
-             (setq xC (/ (+ xL xR) 2.0))
+            (setq xC (/ (+ xL xR) 2.0))
              (setq totalBarsBase (if (and (numberp baseNum) (> baseNum 0)) baseNum 1))
              (princ
                (strcat
@@ -2215,10 +2217,7 @@
 
              (if (and bastVar (> bastNum 0))
                (progn
-                 (setq nO (getint (strcat "\n  Cuantos BASTONES van en orillas (Total) (0-" (itoa bastNum) ")?: ")))
-                 (if (null nO) (setq nO 0))
-                 (if (< nO 0) (setq nO 0))
-                 (if (> nO bastNum) (setq nO bastNum))
+                 (setq nO (ocmema--clamp-int (getint (strcat "\n  Cuantos BASTONES van en orillas (Total) (0-" (itoa bastNum) ")?: ")) 0 bastNum))
                  (setq nC (- bastNum nO))
                  (setq levelsIzq (ocmema--count-near positions xL eps))
                  (setq levelsDer (ocmema--count-near positions xR eps))
@@ -2324,10 +2323,7 @@
              (ocmema--draw-xlist positions yStart)
              (if (and bastVar (> bastNum 0))
                (progn
-                 (setq nO (getint (strcat "\nBastones (" (if isTop "SUP" "INF") "): tienes " (itoa bastNum) ". Cuantas barras van en orillas (Total)?: ")))
-                 (if (null nO) (setq nO 0))
-                 (if (< nO 0) (setq nO 0))
-                 (if (> nO bastNum) (setq nO bastNum))
+                 (setq nO (ocmema--clamp-int (getint (strcat "\n  Cuantos BASTONES van en orillas (Total) (0-" (itoa bastNum) ")?: ")) 0 bastNum))
                  (setq nC (- bastNum nO))
                  (setq levelsIzq (ocmema--count-near positions xL eps))
                  (setq levelsDer (ocmema--count-near positions xR eps))
@@ -2528,6 +2524,14 @@
       (command "_.LINE" pH2 (polar pH2 (* 45.0 (/ pi 180.0)) 0.30) "")
       (command "_.CHPROP" (entlast) "" "Color" 3 "")
       (princ "\nB-B: gancho escalonado dibujado (inf-izq)")
+
+      (setq yTopGlobal (max (cadr p2_st_BB_main) (cadr p2_st_BB_step)))
+      (setq yTextAA (+ yTopGlobal offsetText))
+      (setq yTextBB (+ yTopGlobal offsetText))
+      (command "_.TEXT" "_J" "_MC" (list xCenterA yTextAA) 0.18 0 "A-A")
+      (command "_.CHPROP" (entlast) "" "Color" 4 "")
+      (command "_.TEXT" "_J" "_MC" (list xCenterB yTextBB) 0.18 0 "B-B")
+      (command "_.CHPROP" (entlast) "" "Color" 4 "")
 
       (setq bb-use-anchor T)
       (setq bb-align almaAlign)
