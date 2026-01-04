@@ -1965,16 +1965,22 @@
 
          (if (= layoutMode "Largo")
            (progn
-             (setq totalBars (+ baseNum bastNum))
-             (if (< totalBars 1) (setq totalBars 1))
+             (setq totalBarsBase (if (and (numberp baseNum) (> baseNum 0)) baseNum 1))
+             (princ
+               (strcat
+                 "\nDBG: LARGO | baseNum=" (if (numberp baseNum) (itoa baseNum) "nil")
+                 " | bastNum=" (if (numberp bastNum) (itoa bastNum) "nil")
+                 " | totalBarsBase=" (itoa totalBarsBase)
+               )
+             )
              (setq positions nil)
-             (if (= totalBars 1)
+             (if (= totalBarsBase 1)
                (setq positions (list (/ (+ xL xR) 2.0)))
                (progn
                  (setq w (- xR xL))
-                 (setq gap (if (> totalBars 1) (/ w (1- totalBars)) 0.0))
+                 (setq gap (if (> totalBarsBase 1) (/ w (1- totalBarsBase)) 0.0))
                  (setq i 0)
-                 (repeat totalBars
+                 (repeat totalBarsBase
                    (setq positions (append positions (list (+ xL (* i gap)))))
                    (setq i (1+ i))
                  )
@@ -2109,7 +2115,7 @@
 
          (if (and bastVar (> bastNum 0))
            (progn
-             (setq nO (getint (strcat "\nBastones (" (if isTop "SUP" "INF") "): tienes " (itoa bastNum) ". Cuantas barras van en orillas (Total)?: ")))
+             (setq nO (getint (strcat "\n  Cuantos BASTONES van en orillas (Total) (0-" (itoa bastNum) ")?: ")))
              (if (null nO) (setq nO 0))
              (if (< nO 0) (setq nO 0))
              (if (> nO bastNum) (setq nO bastNum))
@@ -2181,11 +2187,18 @@
              (setq xL (+ (car p1_st) (/ diamBase 2.0)))
              (setq xR (- (car p2_st) (/ diamBase 2.0)))
              (setq xC (/ (+ xL xR) 2.0))
-             (setq totalBars (+ baseNum bastNum))
+             (setq totalBarsBase (if (and (numberp baseNum) (> baseNum 0)) baseNum 1))
+             (princ
+               (strcat
+                 "\nDBG: LARGO | baseNum=" (if (numberp baseNum) (itoa baseNum) "nil")
+                 " | bastNum=" (if (numberp bastNum) (itoa bastNum) "nil")
+                 " | totalBarsBase=" (itoa totalBarsBase)
+               )
+             )
              (setq w (- (car p2_st) (car p1_st) diamBase))
-             (setq gap (if (> totalBars 1) (/ w (1- totalBars)) 0.0))
+             (setq gap (if (> totalBarsBase 1) (/ w (1- totalBarsBase)) 0.0))
              (setq i 0 positions nil)
-             (repeat totalBars
+             (repeat totalBarsBase
                (setq cx (+ (car p1_st) (/ diamBase 2.0) (* i gap)))
                (setq positions (append positions (list cx)))
                (setq i (1+ i))
@@ -2202,7 +2215,7 @@
 
              (if (and bastVar (> bastNum 0))
                (progn
-                 (setq nO (getint (strcat "\nBastones (" (if isTop "SUP" "INF") "): tienes " (itoa bastNum) ". Cuantas barras van en orillas (Total)?: ")))
+                 (setq nO (getint (strcat "\n  Cuantos BASTONES van en orillas (Total) (0-" (itoa bastNum) ")?: ")))
                  (if (null nO) (setq nO 0))
                  (if (< nO 0) (setq nO 0))
                  (if (> nO bastNum) (setq nO bastNum))
