@@ -1686,10 +1686,11 @@
   (defun process-layer-steel (baseNum baseVar bastNum bastVar isTop / diamBase diamBast yStart dir layoutMode w gap i cx cy totalBars
                                                                xL xR xStepL xStepR xAnchor xAnchorL xAnchorR
                                                                positions remaining nStep nWide bestPos bestGap
-                                                               nOBase nInner reqAnchors
+                                                               nOBase nInner reqAnchors nO nC ly extraLeft extraRight
+                                                               levelsIzq levelsDer levelsCen
                                                                ocmema--segment-pos ocmema--max-gap ocmema--merge-unique
                                                                ocmema--ensure-anchor ocmema--draw-xlist
-                                                               ocmema--sort-num ocmema--sort-insert eps)
+                                                               ocmema--sort-num ocmema--sort-insert ocmema--str-val eps)
      (setq diamBase (* (/ (obtener-diametro-real baseVar) 100.0) 7.0))
      (setq diamBast 0.0)
      (if bastVar (setq diamBast (* (/ (obtener-diametro-real bastVar) 100.0) 7.0)))
@@ -1767,6 +1768,21 @@
        )
        s
      )
+     (defun ocmema--str-val (v)
+       (cond
+         ((numberp v) (rtos v 2 3))
+         ((listp v) "<list>")
+         ((null v) "nil")
+         (t "<obj>")
+       )
+     )
+     (defun ocmema--as-list (v)
+       (cond
+         ((null v) nil)
+         ((listp v) v)
+         (t (list v))
+       )
+     )
      (defun ocmema--ensure-ptlist (lst y / out e)
        (setq out nil)
        (cond
@@ -1791,12 +1807,12 @@
          (strcat
            "\nOCMEMA: x_list type | num-list=" (if isNumList "T" "nil")
            " | pt-list=" (if isPtList "T" "nil")
-           " | x_list=" (prin1-to-string xlist)
+           " | x_list=" (ocmema--str-val xlist)
          )
        )
        (setq pts (ocmema--ensure-ptlist xlist y))
        (setq firstPt (if (and pts (> (length pts) 0)) (car pts) nil))
-       (princ (strcat "\nOCMEMA: first_pt=" (prin1-to-string firstPt)))
+       (princ (strcat "\nOCMEMA: first_pt=" (ocmema--str-val firstPt)))
        (if pts
          (foreach p pts
            (command "_.DONUT" 0.0 diamBase p "")
@@ -1849,7 +1865,7 @@
            )
            (progn
              ;; Orillas
-             (princ (strcat "\nA-A: helper segment-pos=" (prin1-to-string 'ocmema--segment-pos)))
+             (princ (strcat "\nA-A: helper segment-pos=ocmema--segment-pos"))
              (setq nOBase baseNum)
              (if (> baseNum 2)
                (progn
@@ -1949,7 +1965,7 @@
                (strcat " | x_anchor=" (rtos xAnchor 2 3))
                (strcat " | x_anchor_L=" (rtos xAnchorL 2 3) " | x_anchor_R=" (rtos xAnchorR 2 3))
              )
-             " | x_list=" (prin1-to-string positions)
+             " | x_list=" (ocmema--str-val positions)
            )
          )
 
@@ -1971,18 +1987,31 @@
        (progn
          (if (= layoutMode "Largo")
            (progn
+             (setq totalBars (+ baseNum bastNum))
              (setq w (- (car p2_st) (car p1_st) diamBase))
-             (setq gap (if (> (+ baseNum bastNum) 1) (/ w (1- (+ baseNum bastNum))) 0.0))
-             (setq i 0)
-             (repeat (+ baseNum bastNum)
+             (setq gap (if (> totalBars 1) (/ w (1- totalBars)) 0.0))
+             (setq i 0 positions nil)
+             (repeat totalBars
                (setq cx (+ (car p1_st) (/ diamBase 2.0) (* i gap)))
+               (setq positions (append positions (list cx)))
+               (setq i (1+ i))
+             )
+             (setq positions (ocmema--as-list positions))
+             (princ
+               (strcat
+                 "\nA-A: xlist | is-list=" (if (listp positions) "T" "nil")
+                 " | len=" (itoa (length positions))
+                 " | first=" (ocmema--str-val (car positions))
+               )
+             )
+             (foreach cx positions
                (command "_.DONUT" 0.0 diamBase (list cx yStart) "")
                (command "_.CHPROP" (entlast) "" "Color" 5 "")
-               (setq i (1+ i))
              )
            )
            (progn
-             ;; Orillas (simple)
+             ;; Orillas (igual V0)
+             (setq levelsIzq 0 levelsDer 0 levelsCen 0)
              (setq xL (+ (car p1_st) (/ diamBase 2.0)))
              (setq xR (- (car p2_st) (/ diamBase 2.0)))
              (setq nOBase baseNum)
@@ -1993,27 +2022,75 @@
                  (if (> nOBase baseNum) (setq nOBase baseNum))
                )
              )
-             (setq nInner (- baseNum nOBase))
-             (setq positions (list xL xR))
-             (if (< baseNum 2)
-               (setq positions (list (/ (+ xL xR) 2.0)))
-             (if (> nInner 0)
-               (setq positions (append positions (ocmema--segment-pos xL xR nInner)))
+             (setq positions nil)
+             (if (>= baseNum 2)
+               (progn
+                 (setq positions (append positions (list xL xR)))
+                 (setq levelsIzq 1 levelsDer 1)
+               )
+               (setq positions (append positions (list (/ (+ xL xR) 2.0))))
+             )
+             (if (> nOBase 2)
+               (progn
+                 (setq extraLeft (fix (/ (+ (- nOBase 2) 1) 2)))
+                 (setq extraRight (fix (/ (- nOBase 2) 2)))
+                 (setq i 0)
+                 (repeat extraLeft
+                   (setq levelsIzq (1+ levelsIzq))
+                   (setq positions (append positions (list xL)))
+                   (setq i (1+ i))
+                 )
+                 (setq i 0)
+                 (repeat extraRight
+                   (setq levelsDer (1+ levelsDer))
+                   (setq positions (append positions (list xR)))
+                   (setq i (1+ i))
+                 )
                )
              )
-             (setq positions (ocmema--merge-unique positions eps))
-             (if (numberp positions) (setq positions (list positions)))
+             (setq nInner (- baseNum nOBase))
+             (if (> nInner 0)
+               (progn
+                 (if (= nInner 1)
+                   (setq positions (append positions (list (/ (+ xL xR) 2.0))))
+                   (setq positions (append positions (ocmema--segment-pos xL xR nInner)))
+                 )
+               )
+             )
+             (setq positions (ocmema--as-list positions))
+             (princ
+               (strcat
+                 "\nA-A: xlist | is-list=" (if (listp positions) "T" "nil")
+                 " | len=" (itoa (length positions))
+                 " | first=" (ocmema--str-val (car positions))
+               )
+             )
              (ocmema--draw-xlist positions yStart)
              ;; Bastones se dibujan como donuts adicionales (aprox)
              (if (and bastVar (> bastNum 0))
                (progn
+                 (setq nO (getint "\n  Cuantas barras van en orillas (Total)?: "))
+                 (if (null nO) (setq nO 0))
+                 (setq nC (- bastNum nO))
                  (setq i 0)
-                 (repeat bastNum
-                   (setq cx (if (= (rem i 2) 0) (+ (car p1_st) (/ diamBast 2.0)) (- (car p2_st) (/ diamBast 2.0))))
-                   (setq cy (+ yStart (* (+ 1 (fix (/ i 2))) diamBast dir)))
+                 (repeat nO
+                   (if (= (rem i 2) 0)
+                     (progn (setq cx xL) (setq ly levelsIzq) (setq levelsIzq (1+ levelsIzq)))
+                     (progn (setq cx xR) (setq ly levelsDer) (setq levelsDer (1+ levelsDer)))
+                   )
+                   (setq cy (+ yStart (* ly diamBast dir)))
                    (command "_.DONUT" 0.0 diamBast (list cx cy) "")
                    (command "_.CHPROP" (entlast) "" "Color" 5 "")
                    (setq i (1+ i))
+                 )
+                 (if (> nC 0)
+                   (repeat nC
+                     (setq cx (/ (+ xL xR) 2.0))
+                     (setq cy (+ yStart (* levelsCen diamBast dir)))
+                     (command "_.DONUT" 0.0 diamBast (list cx cy) "")
+                     (command "_.CHPROP" (entlast) "" "Color" 5 "")
+                     (setq levelsCen (1+ levelsCen))
+                   )
                  )
                )
              )
