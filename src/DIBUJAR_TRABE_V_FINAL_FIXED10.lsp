@@ -110,6 +110,7 @@
                                )
 
   (vl-load-com)
+  (setq ocmema--default-project-dir "C:\\Users\\edgar\\OneDrive - ITESO\\OCMEMA_IE\\01. PROYECTOS\\")
 
   ;; ----------------------------------------------------------------------------
   ;; 0) Helpers (mantener estilo V13)
@@ -357,7 +358,9 @@
   ;; ----------------------------------------------------------------------------
   ;; 2) Lectura de ANL (token-by-token, mantiene estilo V13)
   ;; ----------------------------------------------------------------------------
-  (setq file (getfiled "Seleccionar archivo TRABE (ANL)" "" "ANL;TXT;OUT" 4))
+  (setq file (getfiled "Seleccionar archivo TRABE (ANL)"
+                        (if (vl-file-directory-p ocmema--default-project-dir) ocmema--default-project-dir "")
+                        "ANL;TXT;OUT" 4))
   (if (not file) (exit))
 
   (setq filename (vl-filename-base file))

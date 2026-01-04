@@ -51,6 +51,7 @@
                             )
 
   (vl-load-com)
+  (setq ocmema--default-project-dir "C:\\Users\\edgar\\OneDrive - ITESO\\OCMEMA_IE\\01. PROYECTOS\\")
 
   ;; --- 1. FUNCIONES AUXILIARES ---
 
@@ -139,7 +140,9 @@
   ;; ==============================================================================
   ;; 2. LECTURA DE DATOS
   ;; ==============================================================================
-  (setq file (getfiled "Seleccionar archivo TRABE (ANL)" "" "ANL;TXT;OUT" 4))
+  (setq file (getfiled "Seleccionar archivo TRABE (ANL)"
+                        (if (vl-file-directory-p ocmema--default-project-dir) ocmema--default-project-dir "")
+                        "ANL;TXT;OUT" 4))
   (if (not file) (exit))
   (setq filename (vl-filename-base file)) (princ "\n1. Leyendo Geometria y Materiales...")
   (setq fp (open file "r"))
