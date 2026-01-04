@@ -50,7 +50,7 @@
                                 areaBarPlan varPlan qtyPlanRec numPlan asPlan
                                 varWide qtyWideRec numWide asWide
                                 varDeep qtyDeepRec numDeep asDeepExtra
-                                areaWide areaDeep
+                                areaWide areaDeep b_per_cm h_per_cm bDeep hDeep bWide hWide
                                 ySteelPlan ySteelWide
                                 ySteelDeep tramoYFace
 
@@ -144,6 +144,9 @@
            ((= numVar "5") 1.59) ((= numVar "6") 1.91) ((= numVar "8") 2.54)
            ((= numVar "10") 3.18) ((= numVar "12") 3.81) (t 1.0))
   )
+
+  (defun ocmema--num-safe (v) (if (numberp v) v 0.0))
+  (defun ocmema--rtos-safe (v) (rtos (ocmema--num-safe v) 2 3))
   
 
 ;; --- Helpers extra (V_FINAL) ---
@@ -977,8 +980,16 @@
       (setq bB (car stB) hB (cadr stB))
 
       (if (or (> hA hB) (and (= hA hB) (> bA bB)))
-        (progn (setq keyDeep keyA) (setq keyWide keyB))
-        (progn (setq keyDeep keyB) (setq keyWide keyA))
+        (progn
+          (setq keyDeep keyA) (setq keyWide keyB)
+          (setq bDeep bA hDeep hA)
+          (setq bWide bB hWide hB)
+        )
+        (progn
+          (setq keyDeep keyB) (setq keyWide keyA)
+          (setq bDeep bB hDeep hB)
+          (setq bWide bA hWide hA)
+        )
       )
 
       (princ (strcat "\nSeccion Ancha: " keyWide " | Seccion Peraltada: " keyDeep))
@@ -1016,49 +1027,74 @@
       (command "_.FILLET" "P" (entlast))
       (dibujar-leader-blindado (list (/ (+ x_ini x_fin) 2.0) ySteelWide) (strcat (itoa numWide) "#" varWide) escalonIsTop nil)
 
-      ;; Acero extra peraltada SOLO en tramos peraltados (D3.2)
-      (setq asMinDeep (cdr (assoc keyDeep asMinByKey)))
-      (setq asDeepExtra (max 0.0 (- asMinDeep asMinWide)))
+      ;; Acero peraltada (D3.2): siempre se solicita en zona peraltada
+      (setq b_per_cm (ocmema--num-safe bDeep))
+      (setq h_per_cm (- (ocmema--num-safe hDeep) 2.5))
+      (if (< h_per_cm 0.0) (setq h_per_cm 0.0))
+      (if (or (<= b_per_cm 0.0) (<= h_per_cm 0.0) (null fc_val) (null fy_val))
+        (progn
+          (princ "\nERROR: Variables peraltadas invalidas")
+          (setq asMinDeep 0.0)
+        )
+        (setq asMinDeep (* (/ (* 0.8 (sqrt fc_val)) fy_val) b_per_cm h_per_cm))
+      )
+      (princ
+        (strcat
+          "\nDBG: peraltada | fc=" (ocmema--rtos-safe fc_val)
+          " fy=" (ocmema--rtos-safe fy_val)
+          " b_per=" (ocmema--rtos-safe b_per_cm)
+          " h_per=" (ocmema--rtos-safe h_per_cm)
+          " As_min_per=" (ocmema--rtos-safe asMinDeep)
+        )
+      )
 
   (princ (strcat "\n*** AsMin Ancha=" (rtos asMinWide 2 3) " | AsMin Peraltada=" (rtos asMinDeep 2 3) " | Extra Peraltada=" (rtos asDeepExtra 2 3) " cm2 ***"))
 
 
-      (if (> asDeepExtra 0.0001)
-        (progn
-          (princ "\n--- ACERO CARA ESCALONADA: Extra Seccion PERALTADA (solo en tramos peraltados) ---")
-          (setq varDeep (getstring "\nNumero varilla (Extra PERALTADA): "))
-          (setq areaDeep (obtener-area-varilla varDeep))
-          (if (<= areaDeep 0.0) (progn (alert "Abort: Varilla inválida (peraltada).") (exit)))
+      (princ "\n--- ACERO CARA ESCALONADA: Seccion PERALTADA (solo en tramos peraltados) ---")
+      (setq varDeep (getstring "\nNumero varilla (Seccion PERALTADA): "))
+      (setq areaDeep (obtener-area-varilla varDeep))
+      (if (<= areaDeep 0.0) (progn (alert "Abort: Varilla inválida (peraltada).") (exit)))
 
-          (setq qtyDeepRec (fix (+ (/ asDeepExtra areaDeep) 0.9999)))
-          (princ (strcat "\n-> Sugerido: " (itoa qtyDeepRec) " varillas."))
-          (setq numDeep (getint (strcat "\nCantidad definitiva <" (itoa qtyDeepRec) ">: ")))
-          (if (null numDeep) (setq numDeep qtyDeepRec))
+      (setq qtyDeepRec (fix (+ (/ asMinDeep areaDeep) 0.9999)))
+      (if (< qtyDeepRec 2) (setq qtyDeepRec 2))
+      (princ
+        (strcat
+          "\nOCMEMA: Peraltada AsMin | fc=" (ocmema--rtos-safe fc_val)
+          " fy=" (ocmema--rtos-safe fy_val)
+          " b_per=" (ocmema--rtos-safe b_per_cm)
+          " h_per=" (ocmema--rtos-safe h_per_cm)
+          " As_min_per=" (ocmema--rtos-safe asMinDeep)
+          " As_prov=" (ocmema--rtos-safe (* qtyDeepRec areaDeep))
+          " n_barras_sugeridas=" (itoa qtyDeepRec)
+        )
+      )
+      (princ (strcat "\n-> Sugerido: " (itoa qtyDeepRec) " varillas."))
+      (setq numDeep (getint (strcat "\nCantidad definitiva <" (itoa qtyDeepRec) ">: ")))
+      (if (null numDeep) (setq numDeep qtyDeepRec))
+      (if (< numDeep 1) (setq numDeep 1))
 
-          ;; Dibujar por cada tramo peraltado, con y real del contorno peraltado (escalonado)
-          (foreach tramo tramosOrdenados
-            (if (= (nth 6 tramo) keyDeep)
-              (progn
-                (setq t_x1m (nth 1 tramo))
-                (setq t_x2m (nth 2 tramo))
-                (setq x1 (+ xDrawStart t_x1m 0.15))
-                (setq x2 (+ xDrawStart t_x2m -0.15))
-                (if escalonIsTop
-                  (setq ySteelDeep (- (_tramo-yTop tramo) 0.15))
-                  (setq ySteelDeep (+ (_tramo-yBot tramo) 0.15))
-                )
-                (if escalonIsTop
-                  (command "_.PLINE" (list x1 (- ySteelDeep 0.30)) (list x1 ySteelDeep) (list x2 ySteelDeep) (list x2 (- ySteelDeep 0.30)) "")
-                  (command "_.PLINE" (list x1 (+ ySteelDeep 0.30)) (list x1 ySteelDeep) (list x2 ySteelDeep) (list x2 (+ ySteelDeep 0.30)) "")
-                )
-                (command "_.CHPROP" (entlast) "" "Color" 5 "")
-                (command "_.FILLET" "P" (entlast))
-                (dibujar-leader-blindado (list (/ (+ x1 x2) 2.0) ySteelDeep) (strcat (itoa numDeep) "#" varDeep) escalonIsTop nil)
-              )
+      ;; Dibujar por cada tramo peraltado, con y real del contorno peraltado (escalonado)
+      (foreach tramo tramosOrdenados
+        (if (= (nth 6 tramo) keyDeep)
+          (progn
+            (setq t_x1m (nth 1 tramo))
+            (setq t_x2m (nth 2 tramo))
+            (setq x1 (+ xDrawStart t_x1m 0.15))
+            (setq x2 (+ xDrawStart t_x2m -0.15))
+            (if escalonIsTop
+              (setq ySteelDeep (- (_tramo-yTop tramo) 0.15))
+              (setq ySteelDeep (+ (_tramo-yBot tramo) 0.15))
             )
+            (if escalonIsTop
+              (command "_.PLINE" (list x1 (- ySteelDeep 0.30)) (list x1 ySteelDeep) (list x2 ySteelDeep) (list x2 (- ySteelDeep 0.30)) "")
+              (command "_.PLINE" (list x1 (+ ySteelDeep 0.30)) (list x1 ySteelDeep) (list x2 ySteelDeep) (list x2 (+ ySteelDeep 0.30)) "")
+            )
+            (command "_.CHPROP" (entlast) "" "Color" 5 "")
+            (command "_.FILLET" "P" (entlast))
+            (dibujar-leader-blindado (list (/ (+ x1 x2) 2.0) ySteelDeep) (strcat (itoa numDeep) "#" varDeep) escalonIsTop nil)
           )
         )
-        (princ "\n(As_min peraltada no excede a As_min ancha: no se requiere acero extra peraltado.)")
       )
     )
   )
