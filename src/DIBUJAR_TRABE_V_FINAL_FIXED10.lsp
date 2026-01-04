@@ -77,7 +77,7 @@
                                 addCamber numCamber locCamber xCamber yCamber strCamber deltaW gap textW totalW xDelta
 
                                 ;; Sección transversal
-                                ptSectionOrigin xSec ySec
+                                ptSectionOrigin xSec ySec ySecA ySecB
                                 b_draw h_draw_sec
                                 bG_cm bS_cm hG_cm hS_cm
                                 bG_draw bS_draw hG_draw hS_draw
@@ -88,6 +88,8 @@
                                 draw-break-line
                                 hasLosa typeLosa typeLosaAA typeLosaBB capaCompresion h_losa alignLosa
                                 losaExt sep_base sep_extra hasAnyLosa yLosaStartAA yLosaStartBB
+                                yTopBB yBotBB yWide0_A yWide1_A yWide0_B yWide1_B
+                                ySlab0 ySlab1 ySlab0B ySlab1B ySlabMid yTopA yTopB
                                 bbCountBase bbCountInf bbCountSup
                                 yBBMin yBBMax yBBStep bbBranch
                                 bb-use-anchor bb-align
@@ -1482,14 +1484,34 @@
   (setq hG_draw (* (/ hG_cm 100.0) 7.0))
   (setq hS_draw (* (/ hS_cm 100.0) 7.0))
 
+  (setq ySecA ySec)
+  (if (= (length uniqueKeys) 2)
+    (progn
+      (setq ySecB ySec)
+      (setq yTopBB (+ ySecB hG_draw))
+      (setq yBotBB ySecB)
+      (if isAlignInf
+        (progn
+          (setq bbBranch "escalon-arriba")
+          (setq ySecA yBotBB)
+        )
+        (progn
+          (setq bbBranch "escalon-abajo")
+          (setq ySecA (- yTopBB hS_draw))
+        )
+      )
+      (princ (strcat "\nA-A: ySecA=" (rtos ySecA 2 3) " | rama=" bbBranch))
+    )
+  )
+
   ;; A-A (siempre): sección "ancha" (rectangular)
-  (command "_.TEXT" "_J" "_ML" (list xSec (+ ySec hG_draw 0.6)) 0.18 0 "A-A")
+  (command "_.TEXT" "_J" "_ML" (list xSec (+ ySecA hG_draw 0.6)) 0.18 0 "A-A")
   (command "_.CHPROP" (entlast) "" "Color" 4 "")
 
   (setq b_draw (* (/ bMax_cm 100.0) 7.0))
   (setq h_draw_sec (* (/ hMin_cm 100.0) 7.0))
 
-  (command "_.RECTANG" "_F" 0 (list xSec ySec) (list (+ xSec bG_draw) (+ ySec hS_draw)))
+  (command "_.RECTANG" "_F" 0 (list xSec ySecA) (list (+ xSec bG_draw) (+ ySecA hS_draw)))
   (command "_.CHPROP" (entlast) "" "Color" 7 "")
 
   ;; Losa (preguntar por separado A-A y B-B)
@@ -1528,7 +1550,6 @@
   (if (= (length uniqueKeys) 2)
     (progn
       (setq xSecB (+ xSec bG_draw sep_base sep_extra))
-      (setq ySecB ySec)
 
       (command "_.TEXT" "_J" "_ML" (list xSecB (+ ySecB hG_draw 0.6)) 0.18 0 "B-B")
       (command "_.CHPROP" (entlast) "" "Color" 4 "")
@@ -1592,15 +1613,61 @@
     )
   )
 
+  (setq yWide0_A ySecA)
+  (setq yWide1_A (+ ySecA hS_draw))
+  (if (= (length uniqueKeys) 2)
+    (progn
+      (if isAlignInf
+        (progn
+          (setq yWide0_B ySecB)
+          (setq yWide1_B (+ ySecB hS_draw))
+        )
+        (progn
+          (setq yWide0_B (+ ySecB (- hG_draw hS_draw)))
+          (setq yWide1_B (+ ySecB hG_draw))
+        )
+      )
+    )
+  )
+  (setq yTopA yWide1_A)
+  (setq yTopB yWide1_B)
+  (princ
+    (strcat
+      "\nA-A/B-B: yTopA=" (rtos yTopA 2 3)
+      " | yTopB=" (if (numberp yTopB) (rtos yTopB 2 3) "nil")
+    )
+  )
+
   ;; (Losa y estribo/ganchos se mantienen SOLO sobre A-A para no romper lógica visual;
   ;;  en B-B el usuario puede revisar contorno. Esto mantiene robustez.)
 
   ;; Losa (dibujar segun selecciones A-A y B-B)
   (if hasAnyLosa
     (progn
-      (setq yLosaStartAA (+ ySec hS_draw))
-      (if (= alignLosa "Abajo") (setq yLosaStartAA (+ ySec h_losa)))
-      (if (= alignLosa "Centro") (setq yLosaStartAA (+ ySec (/ hS_draw 2.0) (/ h_losa 2.0))))
+      (if (equal h_losa (- yWide1_A yWide0_A) 0.01)
+        (progn
+          (setq ySlab0 yWide0_A)
+          (setq ySlab1 yWide1_A)
+        )
+        (progn
+          (cond
+            ((= alignLosa "Arriba")
+              (setq ySlab1 yWide1_A)
+              (setq ySlab0 (- yWide1_A h_losa))
+            )
+            ((= alignLosa "Abajo")
+              (setq ySlab0 yWide0_A)
+              (setq ySlab1 (+ yWide0_A h_losa))
+            )
+            (t
+              (setq ySlabMid (/ (+ yWide0_A yWide1_A) 2.0))
+              (setq ySlab0 (- ySlabMid (/ h_losa 2.0)))
+              (setq ySlab1 (+ ySlabMid (/ h_losa 2.0)))
+            )
+          )
+        )
+      )
+      (setq yLosaStartAA ySlab1)
 
       (defun draw-break-line (xStart yTop hLosa hCapa isLeft / dir xEnd yCenter ptsHatch)
          (setq dir (if isLeft -1.0 1.0))
@@ -1629,9 +1696,30 @@
 
       (if (= (length uniqueKeys) 2)
         (progn
-          (setq yLosaStartBB (+ ySecB hS_draw))
-          (if (= alignLosa "Abajo") (setq yLosaStartBB (+ ySecB h_losa)))
-          (if (= alignLosa "Centro") (setq yLosaStartBB (+ ySecB (/ hS_draw 2.0) (/ h_losa 2.0))))
+          (if (equal h_losa (- yWide1_B yWide0_B) 0.01)
+            (progn
+              (setq ySlab0B yWide0_B)
+              (setq ySlab1B yWide1_B)
+            )
+            (progn
+              (cond
+                ((= alignLosa "Arriba")
+                  (setq ySlab1B yWide1_B)
+                  (setq ySlab0B (- yWide1_B h_losa))
+                )
+                ((= alignLosa "Abajo")
+                  (setq ySlab0B yWide0_B)
+                  (setq ySlab1B (+ yWide0_B h_losa))
+                )
+                (t
+                  (setq ySlabMid (/ (+ yWide0_B yWide1_B) 2.0))
+                  (setq ySlab0B (- ySlabMid (/ h_losa 2.0)))
+                  (setq ySlab1B (+ ySlabMid (/ h_losa 2.0)))
+                )
+              )
+            )
+          )
+          (setq yLosaStartBB ySlab1B)
           (if (or (= typeLosaBB "Izq") (= typeLosaBB "Ambos")) (draw-break-line xSecB yLosaStartBB h_losa capaCompresion T))
           (if (or (= typeLosaBB "Der") (= typeLosaBB "Ambos")) (draw-break-line (+ xSecB bG_draw) yLosaStartBB h_losa capaCompresion nil))
         )
@@ -1642,8 +1730,8 @@
   ;; Estribo (igual V13 sobre A-A)
   (setq radFillet 0.025)
   (setq rec_draw 0.175)
-  (setq p1_st (list (+ xSec rec_draw) (+ ySec rec_draw)))
-  (setq p2_st (list (- (+ xSec bG_draw) rec_draw) (- (+ ySec hS_draw) rec_draw)))
+  (setq p1_st (list (+ xSec rec_draw) (+ ySecA rec_draw)))
+  (setq p2_st (list (- (+ xSec bG_draw) rec_draw) (- (+ ySecA hS_draw) rec_draw)))
   (command "_.RECTANG" "_F" radFillet p1_st p2_st)
   (command "_.CHPROP" (entlast) "" "Color" 3 "")
   (command "_.RECTANG" "_F" 0 (list 0 0) (list 0 0))
@@ -1685,12 +1773,12 @@
   (setq critBastSup (get-critical-bast bastonesSupList))
 
   (defun process-layer-steel (baseNum baseVar bastNum bastVar isTop / diamBase diamBast yStart dir layoutMode w gap i cx cy totalBars
-                                                               xL xR xStepL xStepR xAnchor xAnchorL xAnchorR
+                                                               xL xR xC xStepL xStepR xAnchor xAnchorL xAnchorR
                                                                positions remaining nStep nWide bestPos bestGap
                                                                nOBase nInner reqAnchors nO nC ly extraLeft extraRight
-                                                               levelsIzq levelsDer levelsCen
+                                                               levelsIzq levelsDer levelsCen levelsCenR
                                                                ocmema--segment-pos ocmema--max-gap ocmema--merge-unique
-                                                               ocmema--ensure-anchor ocmema--draw-xlist
+                                                               ocmema--ensure-anchor ocmema--draw-xlist ocmema--count-near
                                                                ocmema--sort-num ocmema--sort-insert ocmema--str-val eps)
      (setq diamBase (* (/ (obtener-diametro-real baseVar) 100.0) 7.0))
      (setq diamBast 0.0)
@@ -1803,6 +1891,15 @@
          ((listp v) v)
          (t (list v))
        )
+     )
+     (defun ocmema--count-near (lst target tol / count v)
+       (setq count 0)
+       (foreach v (ocmema--as-list lst)
+         (if (and (numberp v) (<= (abs (- v target)) tol))
+           (setq count (1+ count))
+         )
+       )
+       count
      )
      (defun ocmema--ensure-ptlist (lst y / out e)
        (setq out nil)
@@ -2000,15 +2097,70 @@
 
          (ocmema--draw-xlist positions yStart)
 
-         (if (and (= layoutMode "Orillas") bastVar (> bastNum 0))
+         (if (and bastVar (> bastNum 0))
            (progn
+             (setq nO (getint (strcat "\nBastones (" (if isTop "SUP" "INF") "): tienes " (itoa bastNum) ". Cuantas barras van en orillas (Total)?: ")))
+             (if (null nO) (setq nO 0))
+             (if (< nO 0) (setq nO 0))
+             (if (> nO bastNum) (setq nO bastNum))
+             (setq nC (- bastNum nO))
+             (setq levelsIzq (ocmema--count-near positions xL eps))
+             (setq levelsDer (ocmema--count-near positions xR eps))
+             (if (= bb-align "Centro")
+               (progn
+                 (setq levelsCen (ocmema--count-near positions xAnchorL eps))
+                 (setq levelsCenR (ocmema--count-near positions xAnchorR eps))
+               )
+               (setq levelsCen (ocmema--count-near positions xAnchor eps))
+             )
+             (princ
+               (strcat
+                 "\nBastones (" (if isTop "SUP" "INF") "): bastNum=" (itoa bastNum)
+                 " nO=" (itoa nO) " nC=" (itoa nC)
+               )
+             )
+             (princ
+               (strcat
+                 "\nLevels start: izq=" (itoa levelsIzq)
+                 " der=" (itoa levelsDer)
+                 " cen=" (itoa levelsCen)
+                 (if (= bb-align "Centro") (strcat " cenR=" (itoa levelsCenR)) "")
+               )
+             )
              (setq i 0)
-             (repeat bastNum
-               (setq cx (if (= (rem i 2) 0) xL xR))
-               (setq cy (+ yStart (* (+ 1 (fix (/ i 2))) diamBast dir)))
+             (repeat nO
+               (if (= (rem i 2) 0)
+                 (progn (setq cx xL) (setq ly levelsIzq) (setq levelsIzq (1+ levelsIzq)))
+                 (progn (setq cx xR) (setq ly levelsDer) (setq levelsDer (1+ levelsDer)))
+               )
+               (setq cy (+ yStart (* ly diamBast dir)))
                (command "_.DONUT" 0.0 diamBast (list cx cy) "")
                (command "_.CHPROP" (entlast) "" "Color" 5 "")
                (setq i (1+ i))
+             )
+             (if (> nC 0)
+               (progn
+                 (setq i 0)
+                 (repeat nC
+                   (if (= bb-align "Centro")
+                     (progn
+                       (if (= (rem i 2) 0)
+                         (progn (setq cx xAnchorL) (setq ly levelsCen) (setq levelsCen (1+ levelsCen)))
+                         (progn (setq cx xAnchorR) (setq ly levelsCenR) (setq levelsCenR (1+ levelsCenR)))
+                       )
+                     )
+                     (progn
+                       (setq cx xAnchor)
+                       (setq ly levelsCen)
+                       (setq levelsCen (1+ levelsCen))
+                     )
+                   )
+                   (setq cy (+ yStart (* ly diamBast dir)))
+                   (command "_.DONUT" 0.0 diamBast (list cx cy) "")
+                   (command "_.CHPROP" (entlast) "" "Color" 5 "")
+                   (setq i (1+ i))
+                 )
+               )
              )
            )
          )
@@ -2016,6 +2168,9 @@
        (progn
          (if (= layoutMode "Largo")
            (progn
+             (setq xL (+ (car p1_st) (/ diamBase 2.0)))
+             (setq xR (- (car p2_st) (/ diamBase 2.0)))
+             (setq xC (/ (+ xL xR) 2.0))
              (setq totalBars (+ baseNum bastNum))
              (setq w (- (car p2_st) (car p1_st) diamBase))
              (setq gap (if (> totalBars 1) (/ w (1- totalBars)) 0.0))
@@ -2033,9 +2188,57 @@
                  " | first=" (ocmema--str-val (car positions))
                )
              )
-             (foreach cx positions
-               (command "_.DONUT" 0.0 diamBase (list cx yStart) "")
-               (command "_.CHPROP" (entlast) "" "Color" 5 "")
+             (ocmema--draw-xlist positions yStart)
+
+             (if (and bastVar (> bastNum 0))
+               (progn
+                 (setq nO (getint (strcat "\nBastones (" (if isTop "SUP" "INF") "): tienes " (itoa bastNum) ". Cuantas barras van en orillas (Total)?: ")))
+                 (if (null nO) (setq nO 0))
+                 (if (< nO 0) (setq nO 0))
+                 (if (> nO bastNum) (setq nO bastNum))
+                 (setq nC (- bastNum nO))
+                 (setq levelsIzq (ocmema--count-near positions xL eps))
+                 (setq levelsDer (ocmema--count-near positions xR eps))
+                 (setq levelsCen (ocmema--count-near positions xC eps))
+                 (princ
+                   (strcat
+                     "\nBastones (" (if isTop "SUP" "INF") "): bastNum=" (itoa bastNum)
+                     " nO=" (itoa nO) " nC=" (itoa nC)
+                   )
+                 )
+                 (princ
+                   (strcat
+                     "\nLevels start: izq=" (itoa levelsIzq)
+                     " der=" (itoa levelsDer)
+                     " cen=" (itoa levelsCen)
+                   )
+                 )
+                 (setq i 0)
+                 (repeat nO
+                   (if (= (rem i 2) 0)
+                     (progn (setq cx xL) (setq ly levelsIzq) (setq levelsIzq (1+ levelsIzq)))
+                     (progn (setq cx xR) (setq ly levelsDer) (setq levelsDer (1+ levelsDer)))
+                   )
+                   (setq cy (+ yStart (* ly diamBast dir)))
+                   (command "_.DONUT" 0.0 diamBast (list cx cy) "")
+                   (command "_.CHPROP" (entlast) "" "Color" 5 "")
+                   (setq i (1+ i))
+                 )
+                 (if (> nC 0)
+                   (progn
+                     (setq i 0)
+                     (repeat nC
+                       (setq cx xC)
+                       (setq ly levelsCen)
+                       (setq levelsCen (1+ levelsCen))
+                       (setq cy (+ yStart (* ly diamBast dir)))
+                       (command "_.DONUT" 0.0 diamBast (list cx cy) "")
+                       (command "_.CHPROP" (entlast) "" "Color" 5 "")
+                       (setq i (1+ i))
+                     )
+                   )
+                 )
+               )
              )
            )
            (progn
@@ -2043,6 +2246,7 @@
              (setq levelsIzq 0 levelsDer 0 levelsCen 0)
              (setq xL (+ (car p1_st) (/ diamBase 2.0)))
              (setq xR (- (car p2_st) (/ diamBase 2.0)))
+             (setq xC (/ (+ xL xR) 2.0))
              (setq nOBase baseNum)
              (if (> baseNum 2)
                (progn
@@ -2095,12 +2299,29 @@
                )
              )
              (ocmema--draw-xlist positions yStart)
-             ;; Bastones se dibujan como donuts adicionales (aprox)
              (if (and bastVar (> bastNum 0))
                (progn
-                 (setq nO (getint "\n  Cuantas barras van en orillas (Total)?: "))
+                 (setq nO (getint (strcat "\nBastones (" (if isTop "SUP" "INF") "): tienes " (itoa bastNum) ". Cuantas barras van en orillas (Total)?: ")))
                  (if (null nO) (setq nO 0))
+                 (if (< nO 0) (setq nO 0))
+                 (if (> nO bastNum) (setq nO bastNum))
                  (setq nC (- bastNum nO))
+                 (setq levelsIzq (ocmema--count-near positions xL eps))
+                 (setq levelsDer (ocmema--count-near positions xR eps))
+                 (setq levelsCen (ocmema--count-near positions xC eps))
+                 (princ
+                   (strcat
+                     "\nBastones (" (if isTop "SUP" "INF") "): bastNum=" (itoa bastNum)
+                     " nO=" (itoa nO) " nC=" (itoa nC)
+                   )
+                 )
+                 (princ
+                   (strcat
+                     "\nLevels start: izq=" (itoa levelsIzq)
+                     " der=" (itoa levelsDer)
+                     " cen=" (itoa levelsCen)
+                   )
+                 )
                  (setq i 0)
                  (repeat nO
                    (if (= (rem i 2) 0)
@@ -2113,12 +2334,17 @@
                    (setq i (1+ i))
                  )
                  (if (> nC 0)
-                   (repeat nC
-                     (setq cx (/ (+ xL xR) 2.0))
-                     (setq cy (+ yStart (* levelsCen diamBast dir)))
-                     (command "_.DONUT" 0.0 diamBast (list cx cy) "")
-                     (command "_.CHPROP" (entlast) "" "Color" 5 "")
-                     (setq levelsCen (1+ levelsCen))
+                   (progn
+                     (setq i 0)
+                     (repeat nC
+                       (setq cx xC)
+                       (setq ly levelsCen)
+                       (setq levelsCen (1+ levelsCen))
+                       (setq cy (+ yStart (* ly diamBast dir)))
+                       (command "_.DONUT" 0.0 diamBast (list cx cy) "")
+                       (command "_.CHPROP" (entlast) "" "Color" 5 "")
+                       (setq i (1+ i))
+                     )
                    )
                  )
                )
@@ -2145,7 +2371,24 @@
       " | bastonesSupVacia=" (ocmema--list-empty bastonesSupList)
     )
   )
-  (setq bb-use-anchor nil)
+  (if (= (length uniqueKeys) 2)
+    (progn
+      (setq bb-use-anchor T)
+      (setq bb-align almaAlign)
+      (setq bb-x-left-wide (+ xSec rec_draw))
+      (setq bb-x-right-wide (- (+ xSec bG_draw) rec_draw))
+      (setq bb-x-inner-left-step (+ xSec almaX0 rec_draw))
+      (setq bb-x-inner-right-step (- (+ xSec almaX0 bS_draw) rec_draw))
+      (princ
+        (strcat
+          "\nA-A: bb-use-anchor=T | bb-align=" (if bb-align bb-align "nil")
+          " | x_stepL=" (rtos bb-x-inner-left-step 2 3)
+          " | x_stepR=" (rtos bb-x-inner-right-step 2 3)
+        )
+      )
+    )
+    (setq bb-use-anchor nil)
+  )
   (process-layer-steel numPlan varPlan (cadr critBastInf) (car critBastInf) nil)
   (process-layer-steel numPlan varPlan (cadr critBastSup) (car critBastSup) T)
   (princ "\nOCMEMA: A-A acero end | rutina=process-layer-steel")
