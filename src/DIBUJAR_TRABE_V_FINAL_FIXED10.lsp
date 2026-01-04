@@ -1505,8 +1505,6 @@
   )
 
   ;; A-A (siempre): sección "ancha" (rectangular)
-  (command "_.TEXT" "_J" "_ML" (list xSec (+ ySecA hG_draw 0.6)) 0.18 0 "A-A")
-  (command "_.CHPROP" (entlast) "" "Color" 4 "")
 
   (setq b_draw (* (/ bMax_cm 100.0) 7.0))
   (setq h_draw_sec (* (/ hMin_cm 100.0) 7.0))
@@ -1550,9 +1548,6 @@
   (if (= (length uniqueKeys) 2)
     (progn
       (setq xSecB (+ xSec bG_draw sep_base sep_extra))
-
-      (command "_.TEXT" "_J" "_ML" (list xSecB (+ ySecB hG_draw 0.6)) 0.18 0 "B-B")
-      (command "_.CHPROP" (entlast) "" "Color" 4 "")
 
       ;; Preguntar alineación del alma
       (initget "Izq Der Centro")
@@ -1627,6 +1622,21 @@
           (setq yWide1_B (+ ySecB hG_draw))
         )
       )
+    )
+  )
+  (setq yTopGlobal yWide1_A)
+  (if (numberp yWide1_B) (if (> yWide1_B yTopGlobal) (setq yTopGlobal yWide1_B)))
+  (setq offsetText 0.6)
+  (setq xCenterA (+ xSec (/ bG_draw 2.0)))
+  (setq yTextAA (+ yTopGlobal offsetText))
+  (command "_.TEXT" "_J" "_MC" (list xCenterA yTextAA) 0.18 0 "A-A")
+  (command "_.CHPROP" (entlast) "" "Color" 4 "")
+  (if (= (length uniqueKeys) 2)
+    (progn
+      (setq xCenterB (+ xSecB (/ bG_draw 2.0)))
+      (setq yTextBB (+ yTopGlobal offsetText))
+      (command "_.TEXT" "_J" "_MC" (list xCenterB yTextBB) 0.18 0 "B-B")
+      (command "_.CHPROP" (entlast) "" "Color" 4 "")
     )
   )
   (setq yTopA yWide1_A)
