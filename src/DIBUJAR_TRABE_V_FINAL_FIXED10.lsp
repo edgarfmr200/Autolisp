@@ -94,6 +94,7 @@
                                 bb-x-left-wide bb-x-right-wide
                                 bb-x-inner-left-step bb-x-inner-right-step
                                 bb-x-anchor bb-x-anchor-l bb-x-anchor-r
+                                stepIsTop numPlan_step varPlan_step
 
                                 ;; Ganchos
                                 rBarTop xStirrupLeft yStirrupTop yStirrupBot offsetHookFactor centerBarX centerBarY pH1 pH2
@@ -2292,10 +2293,42 @@
       )
 
       (setq p1_st p1_st_BB_main p2_st p2_st_BB_main)
+      (princ
+        (strcat
+          "\nOCMEMA: B-B acero WIDE start | p1=(" (rtos (car p1_st) 2 3) "," (rtos (cadr p1_st) 2 3) ")"
+          " | p2=(" (rtos (car p2_st) 2 3) "," (rtos (cadr p2_st) 2 3) ")"
+        )
+      )
       (process-layer-steel numPlan varPlan (cadr critBastInf) (car critBastInf) nil)
-      (princ "\nOCMEMA: B-B acero process-layer-steel called (INF)")
+      (princ "\nOCMEMA: B-B acero WIDE process-layer-steel called (INF)")
       (process-layer-steel numPlan varPlan (cadr critBastSup) (car critBastSup) T)
-      (princ "\nOCMEMA: B-B acero process-layer-steel called (SUP)")
+      (princ "\nOCMEMA: B-B acero WIDE process-layer-steel called (SUP)")
+      (princ "\nOCMEMA: B-B acero WIDE end | rutina=process-layer-steel")
+
+      (setq p1_st p1_st_BB_step p2_st p2_st_BB_step)
+      (setq stepIsTop (= bbBranch "escalon-arriba"))
+      (setq numPlan_step (if (numberp numDeep) numDeep 0))
+      (setq varPlan_step varDeep)
+      (princ
+        (strcat
+          "\nOCMEMA: B-B step steel | rama=" bbBranch
+          " | stepIsTop=" (if stepIsTop "T" "nil")
+          " | numPlan_step=" (if (numberp numPlan_step) (itoa numPlan_step) "nil")
+          " | varPlan_step=" (if varPlan_step varPlan_step "nil")
+          " | p1=(" (rtos (car p1_st) 2 3) "," (rtos (cadr p1_st) 2 3) ")"
+          " | p2=(" (rtos (car p2_st) 2 3) "," (rtos (cadr p2_st) 2 3) ")"
+        )
+      )
+      (if (and varPlan_step (numberp numPlan_step) (> numPlan_step 0))
+        (progn
+          (setq bb-use-anchor nil)
+          (process-layer-steel numPlan_step varPlan_step 0 nil stepIsTop)
+          (princ "\nOCMEMA: B-B acero STEP process-layer-steel called")
+          (setq bb-use-anchor T)
+        )
+        (princ "\nOCMEMA: B-B acero STEP skip (sin acero peraltado)")
+      )
+      (princ "\nOCMEMA: B-B acero STEP end | rutina=process-layer-steel")
       (princ "\nOCMEMA: B-B acero end | rutina=process-layer-steel")
     )
   )
