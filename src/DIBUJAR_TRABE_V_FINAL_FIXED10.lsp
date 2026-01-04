@@ -1685,12 +1685,12 @@
   (setq critBastSup (get-critical-bast bastonesSupList))
 
   (defun process-layer-steel (baseNum baseVar bastNum bastVar isTop / diamBase diamBast yStart dir layoutMode w gap i cx cy totalBars
-                                                               xL xR xStepL xStepR xAnchor xAnchorL xAnchorR
+                                                               xL xR xC xStepL xStepR xAnchor xAnchorL xAnchorR
                                                                positions remaining nStep nWide bestPos bestGap
                                                                nOBase nInner reqAnchors nO nC ly extraLeft extraRight
-                                                               levelsIzq levelsDer levelsCen
+                                                               levelsIzq levelsDer levelsCen levelsCenR
                                                                ocmema--segment-pos ocmema--max-gap ocmema--merge-unique
-                                                               ocmema--ensure-anchor ocmema--draw-xlist
+                                                               ocmema--ensure-anchor ocmema--draw-xlist ocmema--count-near
                                                                ocmema--sort-num ocmema--sort-insert ocmema--str-val eps)
      (setq diamBase (* (/ (obtener-diametro-real baseVar) 100.0) 7.0))
      (setq diamBast 0.0)
@@ -1803,6 +1803,15 @@
          ((listp v) v)
          (t (list v))
        )
+     )
+     (defun ocmema--count-near (lst target tol / count v)
+       (setq count 0)
+       (foreach v (ocmema--as-list lst)
+         (if (and (numberp v) (<= (abs (- v target)) tol))
+           (setq count (1+ count))
+         )
+       )
+       count
      )
      (defun ocmema--ensure-ptlist (lst y / out e)
        (setq out nil)
@@ -2000,15 +2009,70 @@
 
          (ocmema--draw-xlist positions yStart)
 
-         (if (and (= layoutMode "Orillas") bastVar (> bastNum 0))
+         (if (and bastVar (> bastNum 0))
            (progn
+             (setq nO (getint (strcat "\nBastones (" (if isTop "SUP" "INF") "): tienes " (itoa bastNum) ". Cuantas barras van en orillas (Total)?: ")))
+             (if (null nO) (setq nO 0))
+             (if (< nO 0) (setq nO 0))
+             (if (> nO bastNum) (setq nO bastNum))
+             (setq nC (- bastNum nO))
+             (setq levelsIzq (ocmema--count-near positions xL eps))
+             (setq levelsDer (ocmema--count-near positions xR eps))
+             (if (= bb-align "Centro")
+               (progn
+                 (setq levelsCen (ocmema--count-near positions xAnchorL eps))
+                 (setq levelsCenR (ocmema--count-near positions xAnchorR eps))
+               )
+               (setq levelsCen (ocmema--count-near positions xAnchor eps))
+             )
+             (princ
+               (strcat
+                 "\nBastones (" (if isTop "SUP" "INF") "): bastNum=" (itoa bastNum)
+                 " nO=" (itoa nO) " nC=" (itoa nC)
+               )
+             )
+             (princ
+               (strcat
+                 "\nLevels start: izq=" (itoa levelsIzq)
+                 " der=" (itoa levelsDer)
+                 " cen=" (itoa levelsCen)
+                 (if (= bb-align "Centro") (strcat " cenR=" (itoa levelsCenR)) "")
+               )
+             )
              (setq i 0)
-             (repeat bastNum
-               (setq cx (if (= (rem i 2) 0) xL xR))
-               (setq cy (+ yStart (* (+ 1 (fix (/ i 2))) diamBast dir)))
+             (repeat nO
+               (if (= (rem i 2) 0)
+                 (progn (setq cx xL) (setq ly levelsIzq) (setq levelsIzq (1+ levelsIzq)))
+                 (progn (setq cx xR) (setq ly levelsDer) (setq levelsDer (1+ levelsDer)))
+               )
+               (setq cy (+ yStart (* ly diamBast dir)))
                (command "_.DONUT" 0.0 diamBast (list cx cy) "")
                (command "_.CHPROP" (entlast) "" "Color" 5 "")
                (setq i (1+ i))
+             )
+             (if (> nC 0)
+               (progn
+                 (setq i 0)
+                 (repeat nC
+                   (if (= bb-align "Centro")
+                     (progn
+                       (if (= (rem i 2) 0)
+                         (progn (setq cx xAnchorL) (setq ly levelsCen) (setq levelsCen (1+ levelsCen)))
+                         (progn (setq cx xAnchorR) (setq ly levelsCenR) (setq levelsCenR (1+ levelsCenR)))
+                       )
+                     )
+                     (progn
+                       (setq cx xAnchor)
+                       (setq ly levelsCen)
+                       (setq levelsCen (1+ levelsCen))
+                     )
+                   )
+                   (setq cy (+ yStart (* ly diamBast dir)))
+                   (command "_.DONUT" 0.0 diamBast (list cx cy) "")
+                   (command "_.CHPROP" (entlast) "" "Color" 5 "")
+                   (setq i (1+ i))
+                 )
+               )
              )
            )
          )
@@ -2016,6 +2080,9 @@
        (progn
          (if (= layoutMode "Largo")
            (progn
+             (setq xL (+ (car p1_st) (/ diamBase 2.0)))
+             (setq xR (- (car p2_st) (/ diamBase 2.0)))
+             (setq xC (/ (+ xL xR) 2.0))
              (setq totalBars (+ baseNum bastNum))
              (setq w (- (car p2_st) (car p1_st) diamBase))
              (setq gap (if (> totalBars 1) (/ w (1- totalBars)) 0.0))
@@ -2033,9 +2100,57 @@
                  " | first=" (ocmema--str-val (car positions))
                )
              )
-             (foreach cx positions
-               (command "_.DONUT" 0.0 diamBase (list cx yStart) "")
-               (command "_.CHPROP" (entlast) "" "Color" 5 "")
+             (ocmema--draw-xlist positions yStart)
+
+             (if (and bastVar (> bastNum 0))
+               (progn
+                 (setq nO (getint (strcat "\nBastones (" (if isTop "SUP" "INF") "): tienes " (itoa bastNum) ". Cuantas barras van en orillas (Total)?: ")))
+                 (if (null nO) (setq nO 0))
+                 (if (< nO 0) (setq nO 0))
+                 (if (> nO bastNum) (setq nO bastNum))
+                 (setq nC (- bastNum nO))
+                 (setq levelsIzq (ocmema--count-near positions xL eps))
+                 (setq levelsDer (ocmema--count-near positions xR eps))
+                 (setq levelsCen (ocmema--count-near positions xC eps))
+                 (princ
+                   (strcat
+                     "\nBastones (" (if isTop "SUP" "INF") "): bastNum=" (itoa bastNum)
+                     " nO=" (itoa nO) " nC=" (itoa nC)
+                   )
+                 )
+                 (princ
+                   (strcat
+                     "\nLevels start: izq=" (itoa levelsIzq)
+                     " der=" (itoa levelsDer)
+                     " cen=" (itoa levelsCen)
+                   )
+                 )
+                 (setq i 0)
+                 (repeat nO
+                   (if (= (rem i 2) 0)
+                     (progn (setq cx xL) (setq ly levelsIzq) (setq levelsIzq (1+ levelsIzq)))
+                     (progn (setq cx xR) (setq ly levelsDer) (setq levelsDer (1+ levelsDer)))
+                   )
+                   (setq cy (+ yStart (* ly diamBast dir)))
+                   (command "_.DONUT" 0.0 diamBast (list cx cy) "")
+                   (command "_.CHPROP" (entlast) "" "Color" 5 "")
+                   (setq i (1+ i))
+                 )
+                 (if (> nC 0)
+                   (progn
+                     (setq i 0)
+                     (repeat nC
+                       (setq cx xC)
+                       (setq ly levelsCen)
+                       (setq levelsCen (1+ levelsCen))
+                       (setq cy (+ yStart (* ly diamBast dir)))
+                       (command "_.DONUT" 0.0 diamBast (list cx cy) "")
+                       (command "_.CHPROP" (entlast) "" "Color" 5 "")
+                       (setq i (1+ i))
+                     )
+                   )
+                 )
+               )
              )
            )
            (progn
@@ -2043,6 +2158,7 @@
              (setq levelsIzq 0 levelsDer 0 levelsCen 0)
              (setq xL (+ (car p1_st) (/ diamBase 2.0)))
              (setq xR (- (car p2_st) (/ diamBase 2.0)))
+             (setq xC (/ (+ xL xR) 2.0))
              (setq nOBase baseNum)
              (if (> baseNum 2)
                (progn
@@ -2095,12 +2211,29 @@
                )
              )
              (ocmema--draw-xlist positions yStart)
-             ;; Bastones se dibujan como donuts adicionales (aprox)
              (if (and bastVar (> bastNum 0))
                (progn
-                 (setq nO (getint "\n  Cuantas barras van en orillas (Total)?: "))
+                 (setq nO (getint (strcat "\nBastones (" (if isTop "SUP" "INF") "): tienes " (itoa bastNum) ". Cuantas barras van en orillas (Total)?: ")))
                  (if (null nO) (setq nO 0))
+                 (if (< nO 0) (setq nO 0))
+                 (if (> nO bastNum) (setq nO bastNum))
                  (setq nC (- bastNum nO))
+                 (setq levelsIzq (ocmema--count-near positions xL eps))
+                 (setq levelsDer (ocmema--count-near positions xR eps))
+                 (setq levelsCen (ocmema--count-near positions xC eps))
+                 (princ
+                   (strcat
+                     "\nBastones (" (if isTop "SUP" "INF") "): bastNum=" (itoa bastNum)
+                     " nO=" (itoa nO) " nC=" (itoa nC)
+                   )
+                 )
+                 (princ
+                   (strcat
+                     "\nLevels start: izq=" (itoa levelsIzq)
+                     " der=" (itoa levelsDer)
+                     " cen=" (itoa levelsCen)
+                   )
+                 )
                  (setq i 0)
                  (repeat nO
                    (if (= (rem i 2) 0)
@@ -2113,12 +2246,17 @@
                    (setq i (1+ i))
                  )
                  (if (> nC 0)
-                   (repeat nC
-                     (setq cx (/ (+ xL xR) 2.0))
-                     (setq cy (+ yStart (* levelsCen diamBast dir)))
-                     (command "_.DONUT" 0.0 diamBast (list cx cy) "")
-                     (command "_.CHPROP" (entlast) "" "Color" 5 "")
-                     (setq levelsCen (1+ levelsCen))
+                   (progn
+                     (setq i 0)
+                     (repeat nC
+                       (setq cx xC)
+                       (setq ly levelsCen)
+                       (setq levelsCen (1+ levelsCen))
+                       (setq cy (+ yStart (* ly diamBast dir)))
+                       (command "_.DONUT" 0.0 diamBast (list cx cy) "")
+                       (command "_.CHPROP" (entlast) "" "Color" 5 "")
+                       (setq i (1+ i))
+                     )
                    )
                  )
                )
