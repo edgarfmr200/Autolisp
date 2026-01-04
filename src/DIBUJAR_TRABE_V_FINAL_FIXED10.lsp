@@ -1406,7 +1406,8 @@
   ;; Si cara escalonada está abajo (alineación superior), texto abajo puede invadir; usar yMin_global
   (setq yTextEstribos (- yMin_global 1.6))
 
-  (command "_.TEXT" "_J" "_ML" (list xOrigin yTextEstribos) 0.25 0 "E#3")
+  ;; Ticket 11: sección variable usa 2 estribos -> prefijo "2" en texto
+  (command "_.TEXT" "_J" "_ML" (list xOrigin yTextEstribos) 0.25 0 (if (= (length uniqueKeys) 2) "2E#3" "E#3"))
   (command "_.CHPROP" (entlast) "" "Color" 3 "")
 
   (setq numZonesEstribos (getint "\nNumero de zonas de estribos (1 para uniforme): "))
