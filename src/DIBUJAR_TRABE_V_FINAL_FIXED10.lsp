@@ -39,6 +39,7 @@
                                 xDrawStart xDrawEnd
                                 tramo t_x1m t_x2m t_hcm t_bcm t_key
                                 ptsContour
+                                yMin_env yMax_env
 
                                 ;; Ejes cambio sección
                                 boundaryXList bx
@@ -171,6 +172,14 @@
   (defun ocmema--num-safe (v) (if (numberp v) v 0.0))
   (defun ocmema--rtos-safe (v) (rtos (ocmema--num-safe v) 2 3))
   
+  (defun ocmema--dimY (side yMin_env yMax_env / dimOff)
+    (setq dimOff 0.35)
+    (if (= (strcase side) "TOP")
+      (+ yMax_env dimOff)
+      (- yMin_env dimOff)
+    )
+  )
+
 
 ;; --- Helpers extra (V_FINAL) ---
 (defun _axis-index (x axis_list / i tol)
@@ -829,6 +838,23 @@
   )
 )
 
+(setq yMin_env nil yMax_env nil)
+(foreach p ptsContour
+  (if (numberp (cadr p))
+    (progn
+      (if (null yMin_env)
+        (setq yMin_env (cadr p) yMax_env (cadr p))
+        (progn
+          (if (< (cadr p) yMin_env) (setq yMin_env (cadr p)))
+          (if (> (cadr p) yMax_env) (setq yMax_env (cadr p)))
+        )
+      )
+    )
+  )
+)
+(if (null yMin_env) (setq yMin_env yMin_global))
+(if (null yMax_env) (setq yMax_env yMax_global))
+
 (princ (strcat "\nOK: Contorno pts=" (itoa (length ptsContour))))
 
 ;; Dibujar contorno (PLINE cerrada)
@@ -1449,7 +1475,9 @@
                                               x_baston_ini x_baston_fin xMinSeg xMaxSeg startTr endTr nextTr prevTr
                                               boundaryX stepXMax stepXMin LD_DRAW tol coverTrim
                                               startNodeX endNodeX startMemberId endMemberId segTypeStr stepFace faceStr
-                                              x_before x_after clampFlag)
+                                              x_before x_after clampFlag
+                                              dimY dimOff capaStr
+                                              yEdge pt1 pt2 pt1_dim pt2_dim)
     (setq data (ocmema--build-baston-zones isTopFace))
     (setq zones (car data))
     (setq needList (cadr data))
@@ -1459,6 +1487,9 @@
     (setq LD_DRAW 0.65 tol 1e-4 coverTrim 0.15)
     (setq stepFace (if escalonIsTop "SUP" "INF"))
     (setq faceStr (if isTopFace "SUP" "INF"))
+    (setq capaStr (if isTopFace "SUP" "INF"))
+    (setq dimOff 0.35)
+    (setq dimY (if isTopFace (+ yMax_env dimOff) (- yMin_env dimOff)))
     (foreach seg segs
       (setq startIdx (nth 0 seg))
       (setq endIdx   (nth 1 seg))
@@ -1618,13 +1649,48 @@
                         axis_near_start (car _axes)
                         axis_near_end (cadr _axes)
                   )
+                  (setq yEdge (if isTopFace yMax_env yMin_env))
                   (if axis_near_start
-                    (command "_.DIMLINEAR" (list axis_near_start yOrigin) (list x_baston_ini yOrigin)
-                             (list (/ (+ axis_near_start x_baston_ini) 2.0) (if isTopFace (+ yMax_global 0.4) (- yOrigin 0.4))))
+                    (progn
+                      (setq pt1 (list axis_near_start yOrigin))
+                      (setq pt2 (list x_baston_ini yOrigin))
+                      (setq pt1_dim (list (car pt1) yEdge (if (caddr pt1) (caddr pt1) 0.0)))
+                      (setq pt2_dim (list (car pt2) yEdge (if (caddr pt2) (caddr pt2) 0.0)))
+                      (princ
+                        (strcat
+                          "\nDBG DIM BASTON | capa=" capaStr
+                          " | pt1=" (vl-princ-to-string pt1)
+                          " pt2=" (vl-princ-to-string pt2)
+                          " | pt1_dim=" (vl-princ-to-string pt1_dim)
+                          " pt2_dim=" (vl-princ-to-string pt2_dim)
+                          " | yMin=" (rtos yMin_env 2 3)
+                          " yMax=" (rtos yMax_env 2 3)
+                        )
+                      )
+                      (command "_.DIMLINEAR" pt1_dim pt2_dim
+                               (list (/ (+ axis_near_start x_baston_ini) 2.0) dimY))
+                    )
                   )
                   (if axis_near_end
-                    (command "_.DIMLINEAR" (list x_baston_fin yOrigin) (list axis_near_end yOrigin)
-                             (list (/ (+ x_baston_fin axis_near_end) 2.0) (if isTopFace (+ yMax_global 0.4) (- yOrigin 0.4))))
+                    (progn
+                      (setq pt1 (list x_baston_fin yOrigin))
+                      (setq pt2 (list axis_near_end yOrigin))
+                      (setq pt1_dim (list (car pt1) yEdge (if (caddr pt1) (caddr pt1) 0.0)))
+                      (setq pt2_dim (list (car pt2) yEdge (if (caddr pt2) (caddr pt2) 0.0)))
+                      (princ
+                        (strcat
+                          "\nDBG DIM BASTON | capa=" capaStr
+                          " | pt1=" (vl-princ-to-string pt1)
+                          " pt2=" (vl-princ-to-string pt2)
+                          " | pt1_dim=" (vl-princ-to-string pt1_dim)
+                          " pt2_dim=" (vl-princ-to-string pt2_dim)
+                          " | yMin=" (rtos yMin_env 2 3)
+                          " yMax=" (rtos yMax_env 2 3)
+                        )
+                      )
+                      (command "_.DIMLINEAR" pt1_dim pt2_dim
+                               (list (/ (+ x_baston_fin axis_near_end) 2.0) dimY))
+                    )
                   )
 
                   (dibujar-leader-blindado
