@@ -34,6 +34,7 @@
                                 axisXList dimXList idx numNodes node nID nX_cm nX_m
                                 drawX axisCenter pAxisBot pAxisTop centerCircle
                                 yTopRed yDimLoc i
+                                yAxisText xLabel labelStr
 
                                 ;; Contorno variable
                                 xDrawStart xDrawEnd
@@ -908,6 +909,7 @@
   )
 
   ;; Ejes rojos sin burbuja en cambios de sección
+  (setq yAxisText (+ yMax_global 1.25 0.275))
   (setq boundaryXList '())
   (setq i 1)
   (while (< i (length tramosOrdenados))
@@ -1014,7 +1016,16 @@
   (setq varDeep nil qtyDeepRec nil numDeep nil asDeepExtra 0.0)
 
   (if (= (length uniqueKeys) 1)
-    (princ "\n(Seccion constante: no hay acero escalonado adicional.)")
+    (progn
+      (princ "\n(Seccion constante: no hay acero escalonado adicional.)")
+      (foreach tramo tramosOrdenados
+        (setq t_x1m (nth 1 tramo))
+        (setq t_x2m (nth 2 tramo))
+        (setq xLabel (+ xDrawStart (/ (+ t_x1m t_x2m) 2.0)))
+        (command "_.TEXT" "_J" "_MC" (list xLabel yAxisText) 0.18 0 "A-A")
+        (command "_.CHPROP" (entlast) "" "Color" 4 "")
+      )
+    )
     (progn
       ;; Identificar tipo peraltado vs ancho
       ;; criterio: mayor h => peraltada; si empate, mayor b
@@ -1046,6 +1057,15 @@
       )
 
       (princ (strcat "\nSeccion Ancha: " keyWide " | Seccion Peraltada: " keyDeep))
+
+      (foreach tramo tramosOrdenados
+        (setq t_x1m (nth 1 tramo))
+        (setq t_x2m (nth 2 tramo))
+        (setq xLabel (+ xDrawStart (/ (+ t_x1m t_x2m) 2.0)))
+        (setq labelStr (if (= (nth 6 tramo) keyDeep) "B-B" "A-A"))
+        (command "_.TEXT" "_J" "_MC" (list xLabel yAxisText) 0.18 0 labelStr)
+        (command "_.CHPROP" (entlast) "" "Color" 4 "")
+      )
 
       ;; Acero ancha en cara escalonada (continuo y con Y fija del tramo ancho)
       (princ "\n--- ACERO CARA ESCALONADA: Seccion ANCHA (continuo) ---")
