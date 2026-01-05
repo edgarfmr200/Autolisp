@@ -77,6 +77,7 @@
                                 bastNumWideInf_AA bastVarWideInf_AA
                                 bastNumWideSup_AA bastVarWideSup_AA
                                 baseNumWide_AA baseVarWide_AA
+                                wideMemberIds stepMemberIds
                                 baseAreaThisFace
 
                                 ;; Estribos / contraflecha
@@ -1344,7 +1345,46 @@
     )
     (list zones needList)
   )
-  (defun ocmema--merge-baston-zones (zones / out curr z tol sIdx eIdx typ y xS xE def)
+  (defun ocmema--can-merge-baston (idx1 idx2 type1 type2 y1 y2 isTopFace eps / faceStr alignStr stepFace canMerge reason m1 m2)
+    (setq faceStr (if isTopFace "SUP" "INF"))
+    (setq alignStr (if isAlignInf "INF" "SUP"))
+    (setq stepFace (if escalonIsTop "SUP" "INF"))
+    (setq canMerge nil reason "skip")
+    (if (= idx2 idx1)
+      (progn
+        (if (and (= type1 type2) (<= (abs (- y1 y2)) eps))
+          (setq canMerge T reason "same")
+        )
+      )
+    )
+    (if (= idx2 (1+ idx1))
+      (progn
+        (setq m1 (car (nth idx1 tramosOrdenados)))
+        (setq m2 (car (nth idx2 tramosOrdenados)))
+        (cond
+          ((and (<= (abs (- y1 y2)) eps)
+                (or (= type1 type2) (not (= faceStr stepFace))))
+            (setq canMerge T reason "continuo"))
+          ((> (abs (- y1 y2)) eps)
+            (setq canMerge nil reason "dy"))
+          ((and (/= type1 type2) (= faceStr stepFace))
+            (setq canMerge nil reason "stepface"))
+          (t (setq canMerge nil reason "otro"))
+        )
+        (princ
+          (strcat
+            "\nDBG MERGE: face=" faceStr
+            " align=" alignStr
+            " join mID=" (itoa m1) "->" (itoa m2)
+            " | canMerge=" (if canMerge "T" "F")
+            " | reason=" reason
+          )
+        )
+      )
+    )
+    canMerge
+  )
+  (defun ocmema--merge-baston-zones (zones / out curr z tol sIdx eIdx typ y xS xE def canMerge)
     (setq out '() curr nil tol 1e-4)
     (setq zones (vl-sort zones '(lambda (a b) (< (nth 3 a) (nth 3 b)))))
     (foreach z zones
@@ -1353,9 +1393,9 @@
           (setq sIdx (nth 0 z) eIdx (nth 0 z) typ (nth 1 z) y (nth 2 z) xS (nth 3 z) xE (nth 4 z) def (nth 5 z))
           (setq curr (list sIdx eIdx typ y xS xE def))
         )
-        (if (and (= (nth 1 z) typ)
-                 (<= (abs (- (nth 2 z) y)) tol)
-                 (<= (nth 3 z) (+ xE tol)))
+        (progn
+          (setq canMerge (ocmema--can-merge-baston eIdx (nth 0 z) typ (nth 1 z) y (nth 2 z) isTopFace tol))
+          (if (and canMerge (<= (nth 3 z) (+ xE tol)))
           (progn
             (if (> (nth 4 z) xE) (setq xE (nth 4 z)))
             (if (> (nth 5 z) def) (setq def (nth 5 z)))
@@ -1367,20 +1407,37 @@
             (setq sIdx (nth 0 z) eIdx (nth 0 z) typ (nth 1 z) y (nth 2 z) xS (nth 3 z) xE (nth 4 z) def (nth 5 z))
             (setq curr (list sIdx eIdx typ y xS xE def))
           )
-        )
+        ))
       )
     )
     (if curr (setq out (append out (list curr))))
     out
   )
-  (defun ocmema--append-wide-by-member (startIdx endIdx strVarBast numBast isTopFace / i tr mID)
+  (defun ocmema--append-by-member-range (startIdx endIdx strVarBast numBast isTopFace / i tr mID tType)
     (setq i startIdx)
     (while (<= i endIdx)
       (setq tr (nth i tramosOrdenados))
       (setq mID (car tr))
-      (if isTopFace
-        (setq bastonesWideSupByMember (ocmema--assoc-append bastonesWideSupByMember mID (list strVarBast numBast)))
-        (setq bastonesWideInfByMember (ocmema--assoc-append bastonesWideInfByMember mID (list strVarBast numBast)))
+      (setq tType (ocmema--tramo-type tr))
+      (cond
+        ((= tType 'wide)
+          (if isTopFace
+            (progn
+              (setq bastonesWideSupList (append bastonesWideSupList (list (list strVarBast numBast))))
+              (setq bastonesWideSupByMember (ocmema--assoc-append bastonesWideSupByMember mID (list strVarBast numBast)))
+            )
+            (progn
+              (setq bastonesWideInfList (append bastonesWideInfList (list (list strVarBast numBast))))
+              (setq bastonesWideInfByMember (ocmema--assoc-append bastonesWideInfByMember mID (list strVarBast numBast)))
+            )
+          )
+        )
+        (t
+          (if isTopFace
+            (setq bastonesStepSupList (append bastonesStepSupList (list (list strVarBast numBast))))
+            (setq bastonesStepInfList (append bastonesStepInfList (list (list strVarBast numBast))))
+          )
+        )
       )
       (setq i (1+ i))
     )
@@ -1389,7 +1446,8 @@
                                               strVarBast areaBastOne qtyBastRec numBast phi_cm Ld_m pts_fix
                                               x_baston_ini x_baston_fin xMinSeg xMaxSeg startTr endTr nextTr prevTr
                                               boundaryX stepXMax stepXMin LD_DRAW tol coverTrim
-                                              startNodeX endNodeX startMemberId endMemberId segTypeStr)
+                                              startNodeX endNodeX startMemberId endMemberId segTypeStr stepFace faceStr
+                                              x_before x_after clampFlag)
     (setq data (ocmema--build-baston-zones isTopFace))
     (setq zones (car data))
     (setq needList (cadr data))
@@ -1397,6 +1455,8 @@
     (setq segs (ocmema--merge-baston-zones zones))
     (princ (strcat "\nDBG: baston-seg built count=" (itoa (length segs))))
     (setq LD_DRAW 0.65 tol 1e-4 coverTrim 0.15)
+    (setq stepFace (if escalonIsTop "SUP" "INF"))
+    (setq faceStr (if isTopFace "SUP" "INF"))
     (foreach seg segs
       (setq startIdx (nth 0 seg))
       (setq endIdx   (nth 1 seg))
@@ -1412,6 +1472,13 @@
       (setq endMemberId (car endTr))
       (setq startNodeX (+ xDrawStart (nth 1 startTr)))
       (setq endNodeX (+ xDrawStart (nth 2 endTr)))
+      (princ
+        (strcat
+          "\nDBG MERGE RUN: face=" faceStr
+          " | members=[" (itoa startMemberId) "-" (itoa endMemberId) "]"
+          " | x0=" (rtos segX1 2 3) " x1=" (rtos segX2 2 3)
+        )
+      )
       (princ
         (strcat
           "\nDBG: bastonSeg face=" (if isTopFace "SUP" "INF")
@@ -1472,15 +1539,29 @@
                   (if (and (> startIdx 0))
                     (progn
                       (setq prevTr (nth (1- startIdx) tramosOrdenados))
-                      (if (= (ocmema--tramo-type prevTr) 'step)
+                      (if (and (= faceStr stepFace) (= (ocmema--tramo-type prevTr) 'step))
                         (progn
                           (setq boundaryX startNodeX)
                           (if (<= x_baston_ini (+ boundaryX tol))
                             (progn
+                              (setq x_before x_baston_ini clampFlag "F")
                               (setq stepXMin (+ xDrawStart (nth 1 prevTr)))
                               (setq x_baston_ini (max (- x_baston_ini LD_DRAW) stepXMin))
+                              (if (< x_baston_ini stepXMin) (setq clampFlag "T"))
                               (if (< x_baston_ini x_ini) (setq x_baston_ini x_ini))
-                              (princ (strcat "\nDBG: LD applied dir=-X at boundary step->wide | LD_DRAW=" (rtos LD_DRAW 2 3)))
+                              (setq x_after x_baston_ini)
+                              (princ
+                                (strcat
+                                  "\nDBG DEVEXT: face=" faceStr
+                                  " stepFace=" stepFace
+                                  " stepIsTop=" (if escalonIsTop "T" "F")
+                                  " applied=T | add=0.50 | clear=" (rtos coverTrim 2 2)
+                                  " | x_before=" (rtos x_before 2 3)
+                                  " x_after=" (rtos x_after 2 3)
+                                  " | clamp=" clampFlag
+                                  " | dir=-X"
+                                )
+                              )
                             )
                           )
                         )
@@ -1490,15 +1571,29 @@
                   (if (and (< endIdx (1- (length tramosOrdenados))))
                     (progn
                       (setq nextTr (nth (1+ endIdx) tramosOrdenados))
-                      (if (= (ocmema--tramo-type nextTr) 'step)
+                      (if (and (= faceStr stepFace) (= (ocmema--tramo-type nextTr) 'step))
                         (progn
                           (setq boundaryX endNodeX)
                           (if (>= x_baston_fin (- boundaryX tol))
                             (progn
+                              (setq x_before x_baston_fin clampFlag "F")
                               (setq stepXMax (+ xDrawStart (nth 2 nextTr)))
                               (setq x_baston_fin (min (+ x_baston_fin LD_DRAW) stepXMax))
+                              (if (> x_baston_fin stepXMax) (setq clampFlag "T"))
                               (if (> x_baston_fin x_fin) (setq x_baston_fin x_fin))
-                              (princ (strcat "\nDBG: LD applied dir=+X at boundary wide->step | LD_DRAW=" (rtos LD_DRAW 2 3)))
+                              (setq x_after x_baston_fin)
+                              (princ
+                                (strcat
+                                  "\nDBG DEVEXT: face=" faceStr
+                                  " stepFace=" stepFace
+                                  " stepIsTop=" (if escalonIsTop "T" "F")
+                                  " applied=T | add=0.50 | clear=" (rtos coverTrim 2 2)
+                                  " | x_before=" (rtos x_before 2 3)
+                                  " x_after=" (rtos x_after 2 3)
+                                  " | clamp=" clampFlag
+                                  " | dir=+X"
+                                )
+                              )
                             )
                           )
                         )
@@ -1539,19 +1634,7 @@
                     (setq bastonesSupList (append bastonesSupList (list (list strVarBast numBast))))
                     (setq bastonesInfList (append bastonesInfList (list (list strVarBast numBast))))
                   )
-                  (if (= segType 'wide)
-                    (progn
-                      (if isTopFace
-                        (setq bastonesWideSupList (append bastonesWideSupList (list (list strVarBast numBast))))
-                        (setq bastonesWideInfList (append bastonesWideInfList (list (list strVarBast numBast))))
-                      )
-                      (ocmema--append-wide-by-member startIdx endIdx strVarBast numBast isTopFace)
-                    )
-                    (if isTopFace
-                      (setq bastonesStepSupList (append bastonesStepSupList (list (list strVarBast numBast))))
-                      (setq bastonesStepInfList (append bastonesStepInfList (list (list strVarBast numBast))))
-                    )
-                  )
+                  (ocmema--append-by-member-range startIdx endIdx strVarBast numBast isTopFace)
                 )
               )
             )
@@ -1984,6 +2067,41 @@
   (setq critBastWideSup (get-critical-bast bastonesWideSupList))
   (setq critBastStepInf (get-critical-bast bastonesStepInfList))
   (setq critBastStepSup (get-critical-bast bastonesStepSupList))
+  (setq wideMemberIds '() stepMemberIds '())
+  (foreach tramo tramosOrdenados
+    (if (ocmema--tramo-step-p tramo)
+      (setq stepMemberIds (append stepMemberIds (list (car tramo))))
+      (setq wideMemberIds (append wideMemberIds (list (car tramo))))
+    )
+  )
+  (princ
+    (strcat
+      "\nDBG PACK SELECT: zone=WIDE face=INF | members=" (vl-princ-to-string wideMemberIds)
+      " | chosen bastNum=" (itoa (cadr critBastWideInf))
+      " bastVar=" (if (car critBastWideInf) (vl-princ-to-string (car critBastWideInf)) "nil")
+    )
+  )
+  (princ
+    (strcat
+      "\nDBG PACK SELECT: zone=WIDE face=SUP | members=" (vl-princ-to-string wideMemberIds)
+      " | chosen bastNum=" (itoa (cadr critBastWideSup))
+      " bastVar=" (if (car critBastWideSup) (vl-princ-to-string (car critBastWideSup)) "nil")
+    )
+  )
+  (princ
+    (strcat
+      "\nDBG PACK SELECT: zone=STEP face=INF | members=" (vl-princ-to-string stepMemberIds)
+      " | chosen bastNum=" (itoa (cadr critBastStepInf))
+      " bastVar=" (if (car critBastStepInf) (vl-princ-to-string (car critBastStepInf)) "nil")
+    )
+  )
+  (princ
+    (strcat
+      "\nDBG PACK SELECT: zone=STEP face=SUP | members=" (vl-princ-to-string stepMemberIds)
+      " | chosen bastNum=" (itoa (cadr critBastStepSup))
+      " bastVar=" (if (car critBastStepSup) (vl-princ-to-string (car critBastStepSup)) "nil")
+    )
+  )
 
   (setq wideMembersList '())
   (foreach tramo tramosOrdenados
