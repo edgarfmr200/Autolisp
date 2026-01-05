@@ -78,6 +78,8 @@
                                 bastNumWideSup_AA bastVarWideSup_AA
                                 baseNumWide_AA baseVarWide_AA
                                 wideMemberIds stepMemberIds
+                                pack_by_key wideKey stepKey packWide packStep
+                                ocmema--pack-get
                                 baseAreaThisFace
 
                                 ;; Estribos / contraflecha
@@ -2067,40 +2069,36 @@
   (setq critBastWideSup (get-critical-bast bastonesWideSupList))
   (setq critBastStepInf (get-critical-bast bastonesStepInfList))
   (setq critBastStepSup (get-critical-bast bastonesStepSupList))
-  (setq wideMemberIds '() stepMemberIds '())
-  (foreach tramo tramosOrdenados
-    (if (ocmema--tramo-step-p tramo)
-      (setq stepMemberIds (append stepMemberIds (list (car tramo))))
-      (setq wideMemberIds (append wideMemberIds (list (car tramo))))
+  (setq pack_by_key '())
+  (setq wideKey (if (= (length uniqueKeys) 2) keyWide (car uniqueKeys)))
+  (setq stepKey (if (= (length uniqueKeys) 2) keyDeep nil))
+  (setq pack_by_key
+    (cons
+      (list wideKey
+        (list
+          (cons 'INF (list numPlan varPlan (cadr critBastWideInf) (car critBastWideInf)))
+          (cons 'SUP (list numPlan varPlan (cadr critBastWideSup) (car critBastWideSup)))
+        )
+      )
+      pack_by_key
     )
   )
-  (princ
-    (strcat
-      "\nDBG PACK SELECT: zone=WIDE face=INF | members=" (vl-princ-to-string wideMemberIds)
-      " | chosen bastNum=" (itoa (cadr critBastWideInf))
-      " bastVar=" (if (car critBastWideInf) (vl-princ-to-string (car critBastWideInf)) "nil")
+  (if stepKey
+    (setq pack_by_key
+      (cons
+        (list stepKey
+          (list
+            (cons 'INF (list numDeep varDeep (cadr critBastStepInf) (car critBastStepInf)))
+            (cons 'SUP (list numDeep varDeep (cadr critBastStepSup) (car critBastStepSup)))
+          )
+        )
+        pack_by_key
+      )
     )
   )
-  (princ
-    (strcat
-      "\nDBG PACK SELECT: zone=WIDE face=SUP | members=" (vl-princ-to-string wideMemberIds)
-      " | chosen bastNum=" (itoa (cadr critBastWideSup))
-      " bastVar=" (if (car critBastWideSup) (vl-princ-to-string (car critBastWideSup)) "nil")
-    )
-  )
-  (princ
-    (strcat
-      "\nDBG PACK SELECT: zone=STEP face=INF | members=" (vl-princ-to-string stepMemberIds)
-      " | chosen bastNum=" (itoa (cadr critBastStepInf))
-      " bastVar=" (if (car critBastStepInf) (vl-princ-to-string (car critBastStepInf)) "nil")
-    )
-  )
-  (princ
-    (strcat
-      "\nDBG PACK SELECT: zone=STEP face=SUP | members=" (vl-princ-to-string stepMemberIds)
-      " | chosen bastNum=" (itoa (cadr critBastStepSup))
-      " bastVar=" (if (car critBastStepSup) (vl-princ-to-string (car critBastStepSup)) "nil")
-    )
+  (defun ocmema--pack-get (pack face / f)
+    (setq f (assoc face (cadr pack)))
+    (if f (cdr f) nil)
   )
 
   (setq wideMembersList '())
@@ -2852,60 +2850,34 @@
     )
     (setq bb-use-anchor nil)
   )
-  (if wideRep
-    (progn
-      (setq baseNumWide_AA (nth 2 wideRep))
-      (setq bastNumWideInf_AA (nth 4 wideRep))
-      (setq bastVarWideInf_AA (nth 5 wideRep))
-      (setq bastNumWideSup_AA (nth 6 wideRep))
-      (setq bastVarWideSup_AA (nth 7 wideRep))
-    )
-    (progn
-      (setq baseNumWide_AA numPlan)
-      (setq bastNumWideInf_AA (cadr critBastWideInf))
-      (setq bastVarWideInf_AA (car critBastWideInf))
-      (setq bastNumWideSup_AA (cadr critBastWideSup))
-      (setq bastVarWideSup_AA (car critBastWideSup))
-    )
-  )
-  (setq baseVarWide_AA varPlan)
+  (setq packWide (assoc wideKey pack_by_key))
+  (setq baseNum_wide_inf_AA (car (ocmema--pack-get packWide 'INF)))
+  (setq baseVar_wide_inf_AA (cadr (ocmema--pack-get packWide 'INF)))
+  (setq bastNum_wide_inf_AA (caddr (ocmema--pack-get packWide 'INF)))
+  (setq bastVar_wide_inf_AA (cadddr (ocmema--pack-get packWide 'INF)))
+  (setq baseNum_wide_sup_AA (car (ocmema--pack-get packWide 'SUP)))
+  (setq baseVar_wide_sup_AA (cadr (ocmema--pack-get packWide 'SUP)))
+  (setq bastNum_wide_sup_AA (caddr (ocmema--pack-get packWide 'SUP)))
+  (setq bastVar_wide_sup_AA (cadddr (ocmema--pack-get packWide 'SUP)))
   (princ
     (strcat
-      "\nDBG: pick-wide | chosen=" (if wideRepId (itoa wideRepId) "nil")
-      " | baseNum=" (if (numberp baseNumWide_AA) (itoa baseNumWide_AA) "nil")
-      " | bastNum="
-      (itoa
-        (cond
-          ((and (numberp bastNumWideInf_AA) (numberp bastNumWideSup_AA)) (max bastNumWideInf_AA bastNumWideSup_AA))
-          ((numberp bastNumWideInf_AA) bastNumWideInf_AA)
-          ((numberp bastNumWideSup_AA) bastNumWideSup_AA)
-          (t 0)
-        )
-      )
-      " | L_m=" (if (numberp wideRepLen) (rtos wideRepLen 2 3) "nil")
-    )
-  )
-  (setq baseNum_wide_inf_AA baseNumWide_AA)
-  (setq baseVar_wide_inf_AA baseVarWide_AA)
-  (setq bastNum_wide_inf_AA bastNumWideInf_AA)
-  (setq bastVar_wide_inf_AA bastVarWideInf_AA)
-  (setq baseNum_wide_sup_AA baseNumWide_AA)
-  (setq baseVar_wide_sup_AA baseVarWide_AA)
-  (setq bastNum_wide_sup_AA bastNumWideSup_AA)
-  (setq bastVar_wide_sup_AA bastVarWideSup_AA)
-  (princ
-    (strcat
-      "\nDBG PACK: WIDE-INF baseNum=" (if (numberp baseNum_wide_inf_AA) (itoa baseNum_wide_inf_AA) "nil")
+      "\nDBG PACK SELECT | section=A-A | key=" (if wideKey wideKey "nil")
+      " | face=INF | baseNum=" (if (numberp baseNum_wide_inf_AA) (itoa baseNum_wide_inf_AA) "nil")
       " bastNum=" (if (numberp bastNum_wide_inf_AA) (itoa bastNum_wide_inf_AA) "nil")
+      " baseVar=" (if baseVar_wide_inf_AA baseVar_wide_inf_AA "nil")
+      " bastVar=" (if bastVar_wide_inf_AA bastVar_wide_inf_AA "nil")
+    )
+  )
+  (princ
+    (strcat
+      "\nDBG PACK SELECT | section=A-A | key=" (if wideKey wideKey "nil")
+      " | face=SUP | baseNum=" (if (numberp baseNum_wide_sup_AA) (itoa baseNum_wide_sup_AA) "nil")
+      " bastNum=" (if (numberp bastNum_wide_sup_AA) (itoa bastNum_wide_sup_AA) "nil")
+      " baseVar=" (if baseVar_wide_sup_AA baseVar_wide_sup_AA "nil")
+      " bastVar=" (if bastVar_wide_sup_AA bastVar_wide_sup_AA "nil")
     )
   )
   (process-layer-steel baseNum_wide_inf_AA baseVar_wide_inf_AA bastNum_wide_inf_AA bastVar_wide_inf_AA nil)
-  (princ
-    (strcat
-      "\nDBG PACK: WIDE-SUP baseNum=" (if (numberp baseNum_wide_sup_AA) (itoa baseNum_wide_sup_AA) "nil")
-      " bastNum=" (if (numberp bastNum_wide_sup_AA) (itoa bastNum_wide_sup_AA) "nil")
-    )
-  )
   (process-layer-steel baseNum_wide_sup_AA baseVar_wide_sup_AA bastNum_wide_sup_AA bastVar_wide_sup_AA T)
   (princ "\nOCMEMA: A-A acero end | rutina=process-layer-steel")
 
@@ -3066,26 +3038,33 @@
           " | p2=(" (rtos (car p2_st) 2 3) "," (rtos (cadr p2_st) 2 3) ")"
         )
       )
-      (setq baseNum_wide_inf numPlan)
-      (setq baseVar_wide_inf varPlan)
-      (setq bastNum_wide_inf (cadr critBastWideInf))
-      (setq bastVar_wide_inf (car critBastWideInf))
-      (setq baseNum_wide_sup numPlan)
-      (setq baseVar_wide_sup varPlan)
-      (setq bastNum_wide_sup (cadr critBastWideSup))
-      (setq bastVar_wide_sup (car critBastWideSup))
+      (setq packWide (assoc wideKey pack_by_key))
+      (setq baseNum_wide_inf (car (ocmema--pack-get packWide 'INF)))
+      (setq baseVar_wide_inf (cadr (ocmema--pack-get packWide 'INF)))
+      (setq bastNum_wide_inf (caddr (ocmema--pack-get packWide 'INF)))
+      (setq bastVar_wide_inf (cadddr (ocmema--pack-get packWide 'INF)))
+      (setq baseNum_wide_sup (car (ocmema--pack-get packWide 'SUP)))
+      (setq baseVar_wide_sup (cadr (ocmema--pack-get packWide 'SUP)))
+      (setq bastNum_wide_sup (caddr (ocmema--pack-get packWide 'SUP)))
+      (setq bastVar_wide_sup (cadddr (ocmema--pack-get packWide 'SUP)))
       (princ
         (strcat
-          "\nDBG PACK: WIDE-INF baseNum=" (if (numberp baseNum_wide_inf) (itoa baseNum_wide_inf) "nil")
+          "\nDBG PACK SELECT | section=B-B(WIDE) | key=" (if wideKey wideKey "nil")
+          " | face=INF | baseNum=" (if (numberp baseNum_wide_inf) (itoa baseNum_wide_inf) "nil")
           " bastNum=" (if (numberp bastNum_wide_inf) (itoa bastNum_wide_inf) "nil")
+          " baseVar=" (if baseVar_wide_inf baseVar_wide_inf "nil")
+          " bastVar=" (if bastVar_wide_inf bastVar_wide_inf "nil")
         )
       )
       (process-layer-steel baseNum_wide_inf baseVar_wide_inf bastNum_wide_inf bastVar_wide_inf nil)
       (princ "\nOCMEMA: B-B acero WIDE process-layer-steel called (INF)")
       (princ
         (strcat
-          "\nDBG PACK: WIDE-SUP baseNum=" (if (numberp baseNum_wide_sup) (itoa baseNum_wide_sup) "nil")
+          "\nDBG PACK SELECT | section=B-B(WIDE) | key=" (if wideKey wideKey "nil")
+          " | face=SUP | baseNum=" (if (numberp baseNum_wide_sup) (itoa baseNum_wide_sup) "nil")
           " bastNum=" (if (numberp bastNum_wide_sup) (itoa bastNum_wide_sup) "nil")
+          " baseVar=" (if baseVar_wide_sup baseVar_wide_sup "nil")
+          " bastVar=" (if bastVar_wide_sup bastVar_wide_sup "nil")
         )
       )
       (process-layer-steel baseNum_wide_sup baseVar_wide_sup bastNum_wide_sup bastVar_wide_sup T)
@@ -3096,16 +3075,19 @@
       (setq stepIsTop (= bbBranch "escalon-arriba"))
       (setq numPlan_step (if (numberp numDeep) numDeep 0))
       (setq varPlan_step varDeep)
-      (setq baseNum_step numPlan_step)
-      (setq baseVar_step varPlan_step)
+      (setq packStep (assoc stepKey pack_by_key))
       (if stepIsTop
         (progn
-          (setq bastNum_step (cadr critBastStepSup))
-          (setq bastVar_step (car critBastStepSup))
+          (setq baseNum_step (car (ocmema--pack-get packStep 'SUP)))
+          (setq baseVar_step (cadr (ocmema--pack-get packStep 'SUP)))
+          (setq bastNum_step (caddr (ocmema--pack-get packStep 'SUP)))
+          (setq bastVar_step (cadddr (ocmema--pack-get packStep 'SUP)))
         )
         (progn
-          (setq bastNum_step (cadr critBastStepInf))
-          (setq bastVar_step (car critBastStepInf))
+          (setq baseNum_step (car (ocmema--pack-get packStep 'INF)))
+          (setq baseVar_step (cadr (ocmema--pack-get packStep 'INF)))
+          (setq bastNum_step (caddr (ocmema--pack-get packStep 'INF)))
+          (setq bastVar_step (cadddr (ocmema--pack-get packStep 'INF)))
         )
       )
       (princ
@@ -3123,9 +3105,13 @@
           (setq bb-use-anchor nil)
           (princ
             (strcat
-              "\nDBG PACK: STEP stepIsTop=" (if stepIsTop "T" "nil")
-              " baseNum=" (if (numberp baseNum_step) (itoa baseNum_step) "nil")
+              "\nDBG PACK SELECT | section=B-B(STEP) | key=" (if stepKey stepKey "nil")
+              " | stepIsTop=" (if stepIsTop "T" "nil")
+              " | face=" (if stepIsTop "SUP" "INF")
+              " | baseNum=" (if (numberp baseNum_step) (itoa baseNum_step) "nil")
               " bastNum=" (if (numberp bastNum_step) (itoa bastNum_step) "nil")
+              " baseVar=" (if baseVar_step baseVar_step "nil")
+              " bastVar=" (if bastVar_step bastVar_step "nil")
             )
           )
           (process-layer-steel baseNum_step baseVar_step bastNum_step bastVar_step stepIsTop)
