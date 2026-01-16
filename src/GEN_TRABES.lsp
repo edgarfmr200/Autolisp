@@ -8,7 +8,7 @@
                         nervName numClaros hasCantilever cantPos spanLengths coordList i spanLen 
                         totalLen memberCount supportStr numLoads loadType loadVal d1 d2 
                         isUniform b h dimList idx dimPair memID currentX nodeIdx totalNodes
-                        projName unit points plantIdx plantName)
+                        projName units scale points rawLen)
 
   (vl-load-com)
 
@@ -25,7 +25,10 @@
 
   (princ "\n--- DATOS GENERALES DEL PROYECTO (TRABES) ---")
   
-  (setq numNerv (getint "\nCantidad de trabes a generar: "))
+  (if ocmema:*beam-single*
+    (setq numNerv 1)
+    (setq numNerv (getint "\nCantidad de trabes a generar: "))
+  )
   
   ;; Validación Nombre del Proyecto
   (setq projName "")
@@ -54,39 +57,25 @@
   (repeat numNerv
     (princ (strcat "\n\n--- CONFIGURANDO TRABE " (itoa n) " de " (itoa numNerv) " ---"))
     
-    (setq nervName (getstring "\nNombre de la trabe (ej. T-1): "))
-    (if (and (ocmema:proj-beam-name-exists nervName)
-             (or (not ocmema:*beam-replace-name*)
-                 (/= (ocmema:pio-normalize-name nervName)
-                     (ocmema:pio-normalize-name ocmema:*beam-replace-name*))))
+    (if ocmema:*beam-force-name*
+      (setq nervName ocmema:*beam-force-name*)
       (progn
-        (princ "\nOCMEMA: Nombre de trabe duplicado. Elija otro.")
-        (setq nervName "")
-        (while (= nervName "")
-          (setq nervName (getstring "\nNombre de la trabe (ej. T-1): "))
-          (if (or (= nervName "") (ocmema:proj-beam-name-exists nervName))
-            (progn
-              (princ "\nOCMEMA: Nombre de trabe duplicado. Elija otro.")
-              (setq nervName "")
+        (setq nervName (getstring "\nNombre de la trabe (ej. T-1): "))
+        (if (ocmema:proj-beam-name-exists nervName)
+          (progn
+            (princ "\nOCMEMA: Nombre de trabe duplicado. Elija otro.")
+            (setq nervName "")
+            (while (= nervName "")
+              (setq nervName (getstring "\nNombre de la trabe (ej. T-1): "))
+              (if (or (= nervName "") (ocmema:proj-beam-name-exists nervName))
+                (progn
+                  (princ "\nOCMEMA: Nombre de trabe duplicado. Elija otro.")
+                  (setq nervName "")
+                )
+              )
             )
           )
         )
-      )
-    )
-
-    (setq plantIdx (ocmema:pio-getint-min "\nNumero de planta: " 1))
-    (if (or (not plantIdx) (> plantIdx (ocmema:pio-assoc-get "n_plants" ocmema:*project*)))
-      (progn (princ "\nOCMEMA: Planta invalida.") (exit))
-    )
-    (setq plantName (ocmema:proj-get-plant-name plantIdx))
-
-    (setq unit (ocmema:proj-get-beam-unit))
-    (if (not unit)
-      (progn
-        (initget "M C MM")
-        (setq unit (getkword "\nUnidades de captura [M/C/MM]: "))
-        (if (not unit) (exit))
-        (ocmema:proj-set-beam-unit unit)
       )
     )
 
@@ -124,6 +113,20 @@
           (progn (princ "\nOCMEMA: Captura cancelada.") (exit))
         )
         (setq numClaros (1- (length points)))
+        (setq units (ocmema:proj-get-units))
+        (setq scale (ocmema:proj-get-scale))
+        (if (or (not units) (not scale))
+          (progn
+            (setq rawLen (distance (car points) (cadr points)))
+            (princ (strcat "\nOCMEMA: Claro 1 (sin convertir) = " (rtos rawLen 2 6)))
+            (initget "CM M MM")
+            (setq units (getkword "\nUnidades [CM/M/MM]: "))
+            (if (not units) (exit))
+            (setq scale (getreal "\nOCMEMA: Factor de escala (multiplicador) <1.0>: "))
+            (if (not scale) (setq scale 1.0))
+            (ocmema:proj-set-units-scale units scale)
+          )
+        )
         
         ;; Lógica de Voladizos
         (setq cantPos "Ninguno")
@@ -146,7 +149,9 @@
         (setq spanLengths '())
         (setq i 0)
         (while (< i numClaros)
-          (setq spanLen (* (distance (nth i points) (nth (1+ i) points)) (ocmema:proj-unit-factor unit)))
+          (setq spanLen (* (distance (nth i points) (nth (1+ i) points))
+                           (ocmema:proj-unit-factor units)
+                           scale))
           (setq spanLengths (append spanLengths (list spanLen)))
           (setq i (1+ i))
         )
@@ -387,12 +392,8 @@
             (ocmema:proj-upsert-beam
               (list
                 (cons "name" nervName)
-                (cons "plant_idx" plantIdx)
-                (cons "plant_name" plantName)
                 (cons "n_points" (length points))
                 (cons "points_raw" points)
-                (cons "unit" unit)
-                (cons "std_path" fullPath)
               )
             )
             (ocmema:proj-autosave)

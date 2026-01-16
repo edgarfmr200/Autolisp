@@ -6,6 +6,8 @@
 (setq ocmema:*project-io-version* "OCMEMA_PROJECT_V1")
 (setq ocmema:*proj-default-dir* "C:\\Users\\edgar\\OneDrive - ITESO\\OCMEMA_IE\\01. PROYECTOS\\2025\\")
 (setq ocmema:*beam-replace-name* nil)
+(setq ocmema:*beam-force-name* nil)
+(setq ocmema:*beam-single* nil)
 
 ;; TXT keys esperadas (writer actual):
 ;; VERSION: OCMEMA_PROJECT_V1
@@ -182,15 +184,22 @@
   (setq ocmema:*project* proj)
 )
 
-(defun ocmema:proj-get-beam-unit (/ proj unit)
+(defun ocmema:proj-get-units (/ proj unit)
   (setq proj ocmema:*project*)
-  (setq unit (ocmema:pio-assoc-get "beam_unit" proj))
+  (setq unit (ocmema:pio-assoc-get "units" proj))
   (if (and unit (/= unit "")) unit nil)
 )
 
-(defun ocmema:proj-set-beam-unit (unit / proj)
+(defun ocmema:proj-get-scale (/ proj sc)
   (setq proj ocmema:*project*)
-  (setq proj (ocmema:pio-alist-set "beam_unit" unit proj))
+  (setq sc (ocmema:pio-assoc-get "scale" proj))
+  (if (numberp sc) sc nil)
+)
+
+(defun ocmema:proj-set-units-scale (unit scale / proj)
+  (setq proj ocmema:*project*)
+  (setq proj (ocmema:pio-alist-set "units" unit proj))
+  (setq proj (ocmema:pio-alist-set "scale" scale proj))
   (setq ocmema:*project* proj)
 )
 
@@ -198,6 +207,7 @@
   (setq u (strcase unit))
   (cond
     ((= u "M") 100.0)
+    ((= u "CM") 1.0)
     ((= u "C") 1.0)
     ((= u "MM") 0.1)
     (T 1.0)
@@ -379,6 +389,8 @@
     )
     (if olderr (setq *error* olderr))
     (setq ocmema:*beam-replace-name* nil)
+    (setq ocmema:*beam-force-name* nil)
+    (setq ocmema:*beam-single* nil)
     (princ "\nOCMEMA: Regresando al menu...")
     (ocmema:menu-general)
     (princ)
@@ -386,6 +398,8 @@
   (C:GEN_TRABES)
   (if olderr (setq *error* olderr))
   (setq ocmema:*beam-replace-name* nil)
+  (setq ocmema:*beam-force-name* nil)
+  (setq ocmema:*beam-single* nil)
   T
 )
 
@@ -716,6 +730,20 @@
   (ocmema:pio-join out ";")
 )
 
+(defun ocmema:pio-point2d-to-string (pt / x y)
+  (setq x (rtos (car pt) 2 8))
+  (setq y (rtos (cadr pt) 2 8))
+  (strcat x "," y)
+)
+
+(defun ocmema:pio-points2d-to-string (pts / out)
+  (setq out '())
+  (foreach pt pts
+    (setq out (append out (list (ocmema:pio-point2d-to-string pt))))
+  )
+  (ocmema:pio-join out ";")
+)
+
 (defun ocmema:pio-parse-point (s / parts x y z)
   (setq parts (ocmema:pio-split s ","))
   (if (>= (length parts) 2)
@@ -743,6 +771,35 @@
       (setq items (ocmema:pio-split s ";"))
       (foreach item items
         (setq pt (ocmema:pio-parse-point (ocmema:str-trim item)))
+        (if pt (setq out (append out (list pt))))
+      )
+    )
+  )
+  out
+)
+
+(defun ocmema:pio-parse-point2d (s / parts x y)
+  (setq parts (ocmema:pio-split s ","))
+  (if (>= (length parts) 2)
+    (progn
+      (setq x (ocmema:pio-to-number (ocmema:str-trim (nth 0 parts))))
+      (setq y (ocmema:pio-to-number (ocmema:str-trim (nth 1 parts))))
+      (if (and x y)
+        (list x y 0.0)
+        nil
+      )
+    )
+    nil
+  )
+)
+
+(defun ocmema:pio-parse-points2d (s / items out pt)
+  (setq out '())
+  (if (and s (/= s ""))
+    (progn
+      (setq items (ocmema:pio-split s ";"))
+      (foreach item items
+        (setq pt (ocmema:pio-parse-point2d (ocmema:str-trim item)))
         (if pt (setq out (append out (list pt))))
       )
     )
@@ -1048,8 +1105,17 @@
       (setq ynames (ocmema:pio-assoc-get "y_names" proj))
       (setq lines (append lines (list (strcat "X_NAMES=" (ocmema:pio-join xnames ",")))))
       (setq lines (append lines (list (strcat "Y_NAMES=" (ocmema:pio-join ynames ",")))))
-      (if (ocmema:pio-assoc-get "beam_unit" proj)
-        (setq lines (append lines (list (strcat "BEAM_UNIT=" (ocmema:pio-assoc-get "beam_unit" proj)))))
+      (if (or (ocmema:pio-assoc-get "units" proj) (ocmema:pio-assoc-get "scale" proj))
+        (progn
+          (setq lines (append lines (list "[UNITS]")))
+          (if (ocmema:pio-assoc-get "units" proj)
+            (setq lines (append lines (list (strcat "UNITS=" (ocmema:pio-assoc-get "units" proj)))))
+          )
+          (if (ocmema:pio-assoc-get "scale" proj)
+            (setq lines (append lines (list (strcat "SCALE=" (rtos (ocmema:pio-assoc-get "scale" proj) 2 6)))))
+          )
+          (setq lines (append lines (list "[/UNITS]")))
+        )
       )
       (setq plants (ocmema:pio-assoc-get "plants" proj))
       (foreach plant plants
@@ -1065,19 +1131,24 @@
       (setq beams (ocmema:pio-assoc-get "beams" proj))
       (if beams
         (progn
-          (setq idx 1)
+          (setq lines (append lines (list "[BEAMS]")))
           (foreach beam beams
-            (setq lines (append lines (list (strcat "[BEAM " (itoa idx) "]"))))
-            (setq lines (append lines (list (strcat "BEAM_NAME=" (ocmema:pio-assoc-get "name" beam)))))
-            (setq lines (append lines (list (strcat "PLANT_IDX=" (itoa (ocmema:pio-assoc-get "plant_idx" beam))))))
-            (setq lines (append lines (list (strcat "PLANT_NAME=" (ocmema:pio-assoc-get "plant_name" beam)))))
-            (setq lines (append lines (list (strcat "N_POINTS=" (itoa (ocmema:pio-assoc-get "n_points" beam))))))
-            (setq lines (append lines (list (strcat "UNIT=" (ocmema:pio-assoc-get "unit" beam)))))
-            (setq lines (append lines (list (strcat "STD_PATH=" (ocmema:pio-assoc-get "std_path" beam)))))
-            (setq lines (append lines (list (strcat "POINTS=" (ocmema:pio-points-to-string (ocmema:pio-assoc-get "points_raw" beam))))))
-            (setq lines (append lines (list "[/BEAM]")))
-            (setq idx (1+ idx))
+            (setq lines
+              (append lines
+                (list
+                  (strcat
+                    "B|"
+                    (ocmema:pio-assoc-get "name" beam)
+                    "|"
+                    (itoa (ocmema:pio-assoc-get "n_points" beam))
+                    "|"
+                    (ocmema:pio-points2d-to-string (ocmema:pio-assoc-get "points_raw" beam))
+                  )
+                )
+              )
+            )
           )
+          (setq lines (append lines (list "[/BEAMS]")))
         )
       )
       (setq tmp (ocmema:pio-temp-path path))
@@ -1098,6 +1169,8 @@
                                             in-plant plant-index plant-name x-axes y-axes
                                             in-beam beam-index beam-name beam-plant-idx beam-plant-name
                                             beam-npoints beam-unit beam-std-path beam-points
+                                            in-units units scale
+                                            in-beams
                                             plants beams nplants nx ny wall xnames ynames projname proj-beam-unit)
   (setq len (length lines))
   (setq i 0)
@@ -1133,6 +1206,10 @@
         (setq beam-unit "")
         (setq beam-std-path "")
         (setq beam-points '())
+        (setq in-units nil)
+        (setq units nil)
+        (setq scale nil)
+        (setq in-beams nil)
         (setq plants '())
         (setq beams '())
         (setq nplants 0)
@@ -1179,6 +1256,12 @@
                     (setq y-axes '())
                   )
                 )
+               )
+               ((= (strcase key) "/UNITS")
+                (setq in-units nil)
+               )
+               ((= (strcase key) "/BEAMS")
+                (setq in-beams nil)
                )
                ((= (strcase key) "/BEAM")
                 (if (not in-beam)
@@ -1229,6 +1312,12 @@
                   (setq plant-index (1+ (length plants)))
                 )
                )
+               ((= (strcase key) "UNITS")
+                (setq in-units T)
+               )
+               ((= (strcase key) "BEAMS")
+                (setq in-beams T)
+               )
                ((wcmatch (strcase key) "BEAM*")
                 (if in-beam
                   (ocmema:proj-warn "Se encontro nuevo [BEAM] antes de cerrar el anterior.")
@@ -1256,44 +1345,77 @@
              )
             )
             (T
-             (setq kv (ocmema:pio-split-kv line))
-             (if kv
+             (if (and in-beams (wcmatch line "B|*"))
                (progn
-                 (setq key (car kv))
-                 (setq val (cadr kv))
-                 (if in-plant
-                   (cond
-                     ((= key "PLANT_NAME") (setq plant-name val))
-                     ((= key "X_AXES") (setq x-axes (ocmema:pio-parse-axes val)))
-                     ((= key "Y_AXES") (setq y-axes (ocmema:pio-parse-axes val)))
-                     (T (ocmema:proj-warn (strcat "Clave desconocida en PLANT: " key)))
-                   )
-                   (if in-beam
-                     (cond
-                       ((= key "BEAM_NAME") (setq beam-name val))
-                       ((= key "PLANT_IDX") (setq beam-plant-idx (atoi val)))
-                       ((= key "PLANT_NAME") (setq beam-plant-name val))
-                       ((= key "N_POINTS") (setq beam-npoints (atoi val)))
-                       ((= key "UNIT") (setq beam-unit val))
-                       ((= key "STD_PATH") (setq beam-std-path val))
-                       ((= key "POINTS") (setq beam-points (ocmema:pio-parse-points val)))
-                       (T (ocmema:proj-warn (strcat "Clave desconocida en BEAM: " key)))
-                     )
-                     (cond
-                       ((= key "PROJECT_NAME") (setq projname val))
-                       ((= key "N_PLANTS") (setq nplants (atoi val)))
-                       ((= key "WALL_CM") (setq wall (ocmema:pio-to-number val)))
-                       ((= key "NX") (setq nx (atoi val)))
-                       ((= key "NY") (setq ny (atoi val)))
-                       ((= key "X_NAMES") (setq xnames (ocmema:pio-split-list val ",")))
-                       ((= key "Y_NAMES") (setq ynames (ocmema:pio-split-list val ",")))
-                       ((= key "BEAM_UNIT") (setq proj-beam-unit val))
-                       (T (ocmema:proj-warn (strcat "Clave desconocida: " key)))
+                 (setq kv (ocmema:pio-split line "|"))
+                 (if (>= (length kv) 4)
+                   (progn
+                     (setq beam-name (nth 1 kv))
+                     (setq beam-npoints (atoi (nth 2 kv)))
+                     (setq beam-points (ocmema:pio-parse-points2d (nth 3 kv)))
+                     (setq beams
+                       (append beams
+                         (list
+                           (list
+                             (cons "name" beam-name)
+                             (cons "n_points" beam-npoints)
+                             (cons "points_raw" beam-points)
+                           )
+                         )
+                       )
                      )
                    )
+                   (ocmema:proj-warn (strcat "Linea BEAMS invalida: " line))
                  )
                )
-               (ocmema:proj-warn (strcat "Linea sin clave: " line))
+               (progn
+                 (setq kv (ocmema:pio-split-kv line))
+                 (if kv
+                   (progn
+                     (setq key (car kv))
+                     (setq val (cadr kv))
+                     (if in-plant
+                       (cond
+                         ((= key "PLANT_NAME") (setq plant-name val))
+                         ((= key "X_AXES") (setq x-axes (ocmema:pio-parse-axes val)))
+                         ((= key "Y_AXES") (setq y-axes (ocmema:pio-parse-axes val)))
+                         (T (ocmema:proj-warn (strcat "Clave desconocida en PLANT: " key)))
+                       )
+                       (if in-beam
+                         (cond
+                           ((= key "BEAM_NAME") (setq beam-name val))
+                           ((= key "PLANT_IDX") (setq beam-plant-idx (atoi val)))
+                           ((= key "PLANT_NAME") (setq beam-plant-name val))
+                           ((= key "N_POINTS") (setq beam-npoints (atoi val)))
+                           ((= key "UNIT") (setq beam-unit val))
+                           ((= key "STD_PATH") (setq beam-std-path val))
+                           ((= key "POINTS") (setq beam-points (ocmema:pio-parse-points val)))
+                           (T (ocmema:proj-warn (strcat "Clave desconocida en BEAM: " key)))
+                         )
+                         (if in-units
+                           (cond
+                             ((= key "UNITS") (setq units val))
+                             ((= key "SCALE") (setq scale (ocmema:pio-to-number val)))
+                             (T (ocmema:proj-warn (strcat "Clave desconocida en UNITS: " key)))
+                           )
+                           (cond
+                             ((= key "PROJECT_NAME") (setq projname val))
+                             ((= key "N_PLANTS") (setq nplants (atoi val)))
+                             ((= key "WALL_CM") (setq wall (ocmema:pio-to-number val)))
+                             ((= key "NX") (setq nx (atoi val)))
+                             ((= key "NY") (setq ny (atoi val)))
+                             ((= key "X_NAMES") (setq xnames (ocmema:pio-split-list val ",")))
+                             ((= key "Y_NAMES") (setq ynames (ocmema:pio-split-list val ",")))
+                             ((= key "BEAM_UNIT") (setq proj-beam-unit val))
+                             (T (ocmema:proj-warn (strcat "Clave desconocida: " key)))
+                           )
+                         )
+                       )
+                     )
+                   )
+                   (ocmema:proj-warn (strcat "Linea sin clave: " line))
+                 )
+               )
              )
             )
           )
@@ -1373,7 +1495,8 @@
               (cons "ny" ny)
               (cons "x_names" xnames)
               (cons "y_names" ynames)
-              (cons "beam_unit" proj-beam-unit)
+              (cons "units" units)
+              (cons "scale" scale)
               (cons "plants" plants)
               (cons "beams" beams)
               (cons 'PROJECT_NAME projname)
@@ -1383,7 +1506,8 @@
               (cons 'NY ny)
               (cons 'X_NAMES xnames)
               (cons 'Y_NAMES ynames)
-              (cons 'BEAM_UNIT proj-beam-unit)
+              (cons 'UNITS units)
+              (cons 'SCALE scale)
               (cons 'PLANTS plants)
               (cons 'BEAMS beams)
             )
@@ -1869,7 +1993,7 @@
   (princ)
 )
 
-(defun ocmema:menu-modificar-trabe (/ name beam opt points oldpoints unit ok stdPath)
+(defun ocmema:menu-modificar-trabe (/ name beam opt points)
   (setq name (getstring T "\nNombre exacto de la trabe: "))
   (if (not name)
     (ocmema:proj-cancelled)
@@ -1878,51 +2002,27 @@
       (if (not beam)
         (ocmema:proj-log "Trabe no existe.")
         (progn
-          (initget "P C R")
-          (setq opt (getkword "\nModificar [P Puntos/C Completo/R Regresar] <R>: "))
+          (initget "P R X")
+          (setq opt (getkword "\nModificar [P PuntosSoloTXT/R RehacerTrabeSTD/X Regresar] <X>: "))
           (cond
-            ((or (not opt) (= opt "R")) nil)
-            ((= opt "C")
-              (vl-load-com)
-              (setq ocmema:*beam-replace-name* (ocmema:pio-assoc-get "name" beam))
-              (if (ocmema:pio-assoc-get "std_path" beam)
-                (if (findfile (ocmema:pio-assoc-get "std_path" beam))
-                  (vl-file-delete (ocmema:pio-assoc-get "std_path" beam))
-                )
-              )
-             (ocmema:proj-ensure-generators-loaded)
-             (princ "\nOCMEMA: Ejecutando GEN_TRABES...")
-             (ocmema:proj-run-gen-trabes)
-             (princ "\nOCMEMA: Regresando al menu...")
-            )
+            ((or (not opt) (= opt "X")) nil)
             ((= opt "P")
-             (setq oldpoints (ocmema:pio-assoc-get "points_raw" beam))
              (setq points (ocmema:proj-capture-points))
              (if (not points)
                (ocmema:proj-cancelled)
                (progn
-                 (if (/= (length points) (ocmema:pio-assoc-get "n_points" beam))
-                   (ocmema:proj-msg "Cambiaste el numero de claros. Para no romper cargas del .STD, genera una trabe nueva.")
-                   (progn
-                     (setq unit (ocmema:pio-assoc-get "unit" beam))
-                     (setq stdPath (ocmema:pio-assoc-get "std_path" beam))
-                     (if (or (not stdPath) (not (findfile stdPath)))
-                       (ocmema:proj-log "No se encontro el archivo .STD.")
-                       (progn
-                         (setq ok (ocmema:proj-update-std-geometry stdPath points unit))
-                         (if ok
-                           (progn
-                             (ocmema:proj-update-beam-points (ocmema:pio-assoc-get "name" beam) points)
-                             (ocmema:proj-autosave)
-                           )
-                           (ocmema:proj-log "No se pudo actualizar el .STD.")
-                         )
-                       )
-                     )
-                   )
-                 )
+                 (ocmema:proj-update-beam-points (ocmema:pio-assoc-get "name" beam) points)
+                 (ocmema:proj-autosave)
                )
              )
+            )
+            ((= opt "R")
+             (setq ocmema:*beam-force-name* (ocmema:pio-assoc-get "name" beam))
+             (setq ocmema:*beam-single* T)
+             (ocmema:proj-ensure-generators-loaded)
+             (princ "\nOCMEMA: Ejecutando GEN_TRABES...")
+             (ocmema:proj-run-gen-trabes)
+             (princ "\nOCMEMA: Regresando al menu...")
             )
           )
         )
@@ -2054,7 +2154,8 @@
                                       (cons "ny" ny)
                                       (cons "x_names" xnames)
                                       (cons "y_names" ynames)
-                                      (cons "beam_unit" nil)
+                                      (cons "units" nil)
+                                      (cons "scale" nil)
                                       (cons "beams" '())
                                       (cons "plants" plants)
                                     )
