@@ -7,7 +7,8 @@
 (defun c:GEN_TRABES (/ *error* file path dirPath fullPath numNerv jobName dateStr fc matName E_mod 
                         nervName numClaros hasCantilever cantPos spanLengths coordList i spanLen 
                         totalLen memberCount supportStr numLoads loadType loadVal d1 d2 
-                        isUniform b h dimList idx dimPair memID currentX nodeIdx totalNodes)
+                        isUniform b h dimList idx dimPair memID currentX nodeIdx totalNodes
+                        projName unit points plantIdx plantName)
 
   (vl-load-com)
 
@@ -27,13 +28,14 @@
   (setq numNerv (getint "\nCantidad de trabes a generar: "))
   
   ;; Validación Nombre del Proyecto
-  (setq jobName "")
-  (while (or (= jobName "") (vl-string-search " " jobName))
-    (setq jobName (getstring "\nNombre del Proyecto (Sin espacios): "))
-    (if (vl-string-search " " jobName)
-      (princ "\nError: El nombre no puede contener espacios.")
-    )
+  (setq projName "")
+  (if ocmema:*project*
+    (setq projName (ocmema:pio-assoc-get "project_name" ocmema:*project*))
   )
+  (if (or (not projName) (= projName ""))
+    (setq projName "OCMEMA")
+  )
+  (setq jobName (vl-string-translate " " "_" projName))
 
   (setq dateStr (menucmd "M=$(edtime,$(getvar,date),DD-MON-YY)"))
   (princ (strcat "\nFecha detectada: " dateStr))
@@ -53,6 +55,40 @@
     (princ (strcat "\n\n--- CONFIGURANDO TRABE " (itoa n) " de " (itoa numNerv) " ---"))
     
     (setq nervName (getstring "\nNombre de la trabe (ej. T-1): "))
+    (if (and (ocmema:proj-beam-name-exists nervName)
+             (or (not ocmema:*beam-replace-name*)
+                 (/= (ocmema:pio-normalize-name nervName)
+                     (ocmema:pio-normalize-name ocmema:*beam-replace-name*))))
+      (progn
+        (princ "\nOCMEMA: Nombre de trabe duplicado. Elija otro.")
+        (setq nervName "")
+        (while (= nervName "")
+          (setq nervName (getstring "\nNombre de la trabe (ej. T-1): "))
+          (if (or (= nervName "") (ocmema:proj-beam-name-exists nervName))
+            (progn
+              (princ "\nOCMEMA: Nombre de trabe duplicado. Elija otro.")
+              (setq nervName "")
+            )
+          )
+        )
+      )
+    )
+
+    (setq plantIdx (ocmema:pio-getint-min "\nNumero de planta: " 1))
+    (if (or (not plantIdx) (> plantIdx (ocmema:pio-assoc-get "n_plants" ocmema:*project*)))
+      (progn (princ "\nOCMEMA: Planta invalida.") (exit))
+    )
+    (setq plantName (ocmema:proj-get-plant-name plantIdx))
+
+    (setq unit (ocmema:proj-get-beam-unit))
+    (if (not unit)
+      (progn
+        (initget "M C MM")
+        (setq unit (getkword "\nUnidades de captura [M/C/MM]: "))
+        (if (not unit) (exit))
+        (ocmema:proj-set-beam-unit unit)
+      )
+    )
 
     ;; GESTIÓN DE GUARDADO DE ARCHIVO
     (if (= n 1)
@@ -83,7 +119,11 @@
         
         ;; 2. GEOMETRÍA (LONGITUDES)
         (write-line "* --- GEOMETRIA Y NODOS ---" file)
-        (setq numClaros (getint "\nNumero de claros: "))
+        (setq points (ocmema:proj-capture-points))
+        (if (not points)
+          (progn (princ "\nOCMEMA: Captura cancelada.") (exit))
+        )
+        (setq numClaros (1- (length points)))
         
         ;; Lógica de Voladizos
         (setq cantPos "Ninguno")
@@ -104,9 +144,9 @@
         )
 
         (setq spanLengths '())
-        (setq i 1)
-        (repeat numClaros
-          (setq spanLen (getreal (strcat "\nLongitud del claro " (itoa i) " (cm): ")))
+        (setq i 0)
+        (while (< i numClaros)
+          (setq spanLen (* (distance (nth i points) (nth (1+ i) points)) (ocmema:proj-unit-factor unit)))
           (setq spanLengths (append spanLengths (list spanLen)))
           (setq i (1+ i))
         )
@@ -342,6 +382,22 @@
         (write-line "FINISH" file)
 
         (close file)
+        (if ocmema:*project*
+          (progn
+            (ocmema:proj-upsert-beam
+              (list
+                (cons "name" nervName)
+                (cons "plant_idx" plantIdx)
+                (cons "plant_name" plantName)
+                (cons "n_points" (length points))
+                (cons "points_raw" points)
+                (cons "unit" unit)
+                (cons "std_path" fullPath)
+              )
+            )
+            (ocmema:proj-autosave)
+          )
+        )
         (princ (strcat "\nArchivo generado: " nervName))
       )
     )
