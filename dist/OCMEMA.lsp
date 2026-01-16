@@ -11,6 +11,7 @@
       (setq src-dir (strcat root-dir "\\src"))
       (setq files
         (list
+          "OCMEMA_PROJECT_IO.lsp"
           "DIBUJAR_NERV.lsp"
           "DIBUJAR_TRABES_V0.lsp"
           "DIBUJAR_TRABE_V_FINAL_FIXED10.lsp"
