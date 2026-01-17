@@ -8,6 +8,8 @@
 (setq ocmema:*beam-replace-name* nil)
 (setq ocmema:*beam-force-name* nil)
 (setq ocmema:*beam-single* nil)
+(setq ocmema:*rib-force-name* nil)
+(setq ocmema:*rib-single* nil)
 
 ;; TXT keys esperadas (writer actual):
 ;; VERSION: OCMEMA_PROJECT_V1
@@ -100,6 +102,54 @@
 
 (defun ocmema:proj-get-beams (/)
   (ocmema:pio-assoc-get "beams" ocmema:*project*)
+)
+
+(defun ocmema:proj-get-ribs (/)
+  (ocmema:pio-assoc-get "ribs" ocmema:*project*)
+)
+
+(defun ocmema:proj-rib-name-exists (name / ribs item found norm)
+  (setq ribs (ocmema:proj-get-ribs))
+  (setq norm (ocmema:pio-normalize-name name))
+  (setq found nil)
+  (foreach item ribs
+    (if (= (ocmema:pio-normalize-name (ocmema:pio-assoc-get "name" item)) norm)
+      (setq found T)
+    )
+  )
+  found
+)
+
+(defun ocmema:proj-find-rib (name / ribs item found norm)
+  (setq ribs (ocmema:proj-get-ribs))
+  (setq norm (ocmema:pio-normalize-name name))
+  (setq found nil)
+  (foreach item ribs
+    (if (= (ocmema:pio-normalize-name (ocmema:pio-assoc-get "name" item)) norm)
+      (setq found item)
+    )
+  )
+  found
+)
+
+(defun ocmema:proj-upsert-rib (rib / proj ribs out item name norm)
+  (setq proj ocmema:*project*)
+  (setq ribs (ocmema:proj-get-ribs))
+  (if (not ribs) (setq ribs '()))
+  (setq out '())
+  (setq name (ocmema:pio-assoc-get "name" rib))
+  (setq norm (ocmema:pio-normalize-name name))
+  (foreach item ribs
+    (if (= (ocmema:pio-normalize-name (ocmema:pio-assoc-get "name" item)) norm)
+      (setq item rib)
+    )
+    (setq out (append out (list item)))
+  )
+  (if (not (ocmema:proj-rib-name-exists name))
+    (setq out (append out (list rib)))
+  )
+  (setq proj (ocmema:pio-alist-set "ribs" out proj))
+  (setq ocmema:*project* proj)
 )
 
 (defun ocmema:proj-get-plant-name (idx / plants plant name)
@@ -410,12 +460,16 @@
       (princ "\nOCMEMA: Cancelado.")
     )
     (if olderr (setq *error* olderr))
+    (setq ocmema:*rib-force-name* nil)
+    (setq ocmema:*rib-single* nil)
     (princ "\nOCMEMA: Regresando al menu...")
     (ocmema:menu-general)
     (princ)
   )
   (C:GEN_NERV)
   (if olderr (setq *error* olderr))
+  (setq ocmema:*rib-force-name* nil)
+  (setq ocmema:*rib-single* nil)
   T
 )
 
@@ -1089,7 +1143,7 @@
   )
 )
 
-(defun ocmema:pio-save-project (path / proj lines plants plant x_axes y_axes pname xnames ynames tmp ok beams beam idx)
+(defun ocmema:pio-save-project (path / proj lines plants plant x_axes y_axes pname xnames ynames tmp ok beams beam idx ribs rib)
   (setq proj ocmema:*project*)
   (if (not proj)
     (progn (ocmema:proj-log "No hay proyecto cargado.") nil)
@@ -1151,6 +1205,31 @@
           (setq lines (append lines (list "[/BEAMS]")))
         )
       )
+      (setq ribs (ocmema:pio-assoc-get "ribs" proj))
+      (if ribs
+        (progn
+          (setq lines (append lines (list "[RIBS]")))
+          (foreach rib ribs
+            (setq lines
+              (append lines
+                (list
+                  (strcat
+                    "N|"
+                    (ocmema:pio-assoc-get "name" rib)
+                    "|"
+                    (ocmema:pio-assoc-get "dir" rib)
+                    "|"
+                    (rtos (ocmema:pio-assoc-get "spacing" rib) 2 6)
+                    "|"
+                    (itoa (ocmema:pio-assoc-get "n_clear" rib))
+                  )
+                )
+              )
+            )
+          )
+          (setq lines (append lines (list "[/RIBS]")))
+        )
+      )
       (setq tmp (ocmema:pio-temp-path path))
       (if (ocmema:pio-write-lines tmp lines)
         (progn
@@ -1170,7 +1249,8 @@
                                             in-beam beam-index beam-name beam-plant-idx beam-plant-name
                                             beam-npoints beam-unit beam-std-path beam-points
                                             in-units units scale
-                                            in-beams
+                                            in-beams in-ribs
+                                            ribs rib-name rib-dir rib-spacing rib-nclear
                                             plants beams nplants nx ny wall xnames ynames projname proj-beam-unit)
   (setq len (length lines))
   (setq i 0)
@@ -1210,8 +1290,14 @@
         (setq units nil)
         (setq scale nil)
         (setq in-beams nil)
+        (setq in-ribs nil)
+        (setq rib-name "")
+        (setq rib-dir "")
+        (setq rib-spacing 0.0)
+        (setq rib-nclear 0)
         (setq plants '())
         (setq beams '())
+        (setq ribs '())
         (setq nplants 0)
         (setq nx 0)
         (setq ny 0)
@@ -1262,6 +1348,9 @@
                )
                ((= (strcase key) "/BEAMS")
                 (setq in-beams nil)
+               )
+               ((= (strcase key) "/RIBS")
+                (setq in-ribs nil)
                )
                ((= (strcase key) "/BEAM")
                 (if (not in-beam)
@@ -1318,6 +1407,9 @@
                ((= (strcase key) "BEAMS")
                 (setq in-beams T)
                )
+               ((= (strcase key) "RIBS")
+                (setq in-ribs T)
+               )
                ((wcmatch (strcase key) "BEAM*")
                 (if in-beam
                   (ocmema:proj-warn "Se encontro nuevo [BEAM] antes de cerrar el anterior.")
@@ -1368,52 +1460,78 @@
                    (ocmema:proj-warn (strcat "Linea BEAMS invalida: " line))
                  )
                )
-               (progn
-                 (setq kv (ocmema:pio-split-kv line))
-                 (if kv
-                   (progn
-                     (setq key (car kv))
-                     (setq val (cadr kv))
-                     (if in-plant
-                       (cond
-                         ((= key "PLANT_NAME") (setq plant-name val))
-                         ((= key "X_AXES") (setq x-axes (ocmema:pio-parse-axes val)))
-                         ((= key "Y_AXES") (setq y-axes (ocmema:pio-parse-axes val)))
-                         (T (ocmema:proj-warn (strcat "Clave desconocida en PLANT: " key)))
-                       )
-                       (if in-beam
-                         (cond
-                           ((= key "BEAM_NAME") (setq beam-name val))
-                           ((= key "PLANT_IDX") (setq beam-plant-idx (atoi val)))
-                           ((= key "PLANT_NAME") (setq beam-plant-name val))
-                           ((= key "N_POINTS") (setq beam-npoints (atoi val)))
-                           ((= key "UNIT") (setq beam-unit val))
-                           ((= key "STD_PATH") (setq beam-std-path val))
-                           ((= key "POINTS") (setq beam-points (ocmema:pio-parse-points val)))
-                           (T (ocmema:proj-warn (strcat "Clave desconocida en BEAM: " key)))
-                         )
-                         (if in-units
-                           (cond
-                             ((= key "UNITS") (setq units val))
-                             ((= key "SCALE") (setq scale (ocmema:pio-to-number val)))
-                             (T (ocmema:proj-warn (strcat "Clave desconocida en UNITS: " key)))
-                           )
-                           (cond
-                             ((= key "PROJECT_NAME") (setq projname val))
-                             ((= key "N_PLANTS") (setq nplants (atoi val)))
-                             ((= key "WALL_CM") (setq wall (ocmema:pio-to-number val)))
-                             ((= key "NX") (setq nx (atoi val)))
-                             ((= key "NY") (setq ny (atoi val)))
-                             ((= key "X_NAMES") (setq xnames (ocmema:pio-split-list val ",")))
-                             ((= key "Y_NAMES") (setq ynames (ocmema:pio-split-list val ",")))
-                             ((= key "BEAM_UNIT") (setq proj-beam-unit val))
-                             (T (ocmema:proj-warn (strcat "Clave desconocida: " key)))
+               (if (and in-ribs (wcmatch line "N|*"))
+                 (progn
+                   (setq kv (ocmema:pio-split line "|"))
+                   (if (>= (length kv) 5)
+                     (progn
+                       (setq rib-name (nth 1 kv))
+                       (setq rib-dir (nth 2 kv))
+                       (setq rib-spacing (ocmema:pio-to-number (nth 3 kv)))
+                       (setq rib-nclear (atoi (nth 4 kv)))
+                       (setq ribs
+                         (append ribs
+                           (list
+                             (list
+                               (cons "name" rib-name)
+                               (cons "dir" rib-dir)
+                               (cons "spacing" rib-spacing)
+                               (cons "n_clear" rib-nclear)
+                             )
                            )
                          )
                        )
                      )
+                     (ocmema:proj-warn (strcat "Linea RIBS invalida: " line))
                    )
-                   (ocmema:proj-warn (strcat "Linea sin clave: " line))
+                 )
+                 (progn
+                   (setq kv (ocmema:pio-split-kv line))
+                   (if kv
+                     (progn
+                       (setq key (car kv))
+                       (setq val (cadr kv))
+                       (if in-plant
+                         (cond
+                           ((= key "PLANT_NAME") (setq plant-name val))
+                           ((= key "X_AXES") (setq x-axes (ocmema:pio-parse-axes val)))
+                           ((= key "Y_AXES") (setq y-axes (ocmema:pio-parse-axes val)))
+                           (T (ocmema:proj-warn (strcat "Clave desconocida en PLANT: " key)))
+                         )
+                         (if in-beam
+                           (cond
+                             ((= key "BEAM_NAME") (setq beam-name val))
+                             ((= key "PLANT_IDX") (setq beam-plant-idx (atoi val)))
+                             ((= key "PLANT_NAME") (setq beam-plant-name val))
+                             ((= key "N_POINTS") (setq beam-npoints (atoi val)))
+                             ((= key "UNIT") (setq beam-unit val))
+                             ((= key "STD_PATH") (setq beam-std-path val))
+                             ((= key "POINTS") (setq beam-points (ocmema:pio-parse-points val)))
+                             (T (ocmema:proj-warn (strcat "Clave desconocida en BEAM: " key)))
+                           )
+                           (if in-units
+                             (cond
+                               ((= key "UNITS") (setq units val))
+                               ((= key "SCALE") (setq scale (ocmema:pio-to-number val)))
+                               (T (ocmema:proj-warn (strcat "Clave desconocida en UNITS: " key)))
+                             )
+                             (cond
+                               ((= key "PROJECT_NAME") (setq projname val))
+                               ((= key "N_PLANTS") (setq nplants (atoi val)))
+                               ((= key "WALL_CM") (setq wall (ocmema:pio-to-number val)))
+                               ((= key "NX") (setq nx (atoi val)))
+                               ((= key "NY") (setq ny (atoi val)))
+                               ((= key "X_NAMES") (setq xnames (ocmema:pio-split-list val ",")))
+                               ((= key "Y_NAMES") (setq ynames (ocmema:pio-split-list val ",")))
+                               ((= key "BEAM_UNIT") (setq proj-beam-unit val))
+                               (T (ocmema:proj-warn (strcat "Clave desconocida: " key)))
+                             )
+                           )
+                         )
+                       )
+                     )
+                     (ocmema:proj-warn (strcat "Linea sin clave: " line))
+                   )
                  )
                )
              )
@@ -1499,6 +1617,7 @@
               (cons "scale" scale)
               (cons "plants" plants)
               (cons "beams" beams)
+              (cons "ribs" ribs)
               (cons 'PROJECT_NAME projname)
               (cons 'N_PLANTS nplants)
               (cons 'WALL_CM wall)
@@ -1510,6 +1629,7 @@
               (cons 'SCALE scale)
               (cons 'PLANTS plants)
               (cons 'BEAMS beams)
+              (cons 'RIBS ribs)
             )
           )
         )
@@ -1938,15 +2058,7 @@
        (ocmema:menu-generar-trabes)
       )
       ((= opt "N")
-       (if (ocmema:proj-ready-for-generators-p)
-         (progn
-            (ocmema:proj-ensure-generators-loaded)
-           (princ "\nOCMEMA: Ejecutando GEN_NERV...")
-           (ocmema:proj-run-gen-nerv)
-           (princ "\nOCMEMA: Regresando al menu...")
-           (setq done T)
-         )
-       )
+       (ocmema:menu-generar-nervaduras)
       )
     )
   )
@@ -2032,15 +2144,84 @@
   (princ)
 )
 
-(defun ocmema:menu-generar-nervaduras (/ opt done)
+(defun ocmema:menu-generar-nervaduras (/ opt done ribs)
   (setq done nil)
   (while (not done)
-    (initget "N M R")
-    (setq opt (getkword "\nNervaduras [N GenerarNueva/M ModificarExistente/R Regresar] <R>: "))
-    (cond
-      ((or (not opt) (= opt "R")) (setq done T))
-      ((= opt "N") (ocmema:proj-log "Pendiente: Generar Nervaduras"))
-      ((= opt "M") (ocmema:proj-log "No existen nervaduras en este proyecto. Primero genere uno."))
+    (if (not (ocmema:proj-ready-for-generators-p))
+      (setq done T)
+      (progn
+        (setq ribs (ocmema:proj-get-ribs))
+        (if (not ribs)
+          (progn
+            (ocmema:proj-ensure-generators-loaded)
+            (princ "\nOCMEMA: Ejecutando GEN_NERV...")
+            (ocmema:proj-run-gen-nerv)
+            (princ "\nOCMEMA: Regresando al menu...")
+            (setq done T)
+          )
+          (progn
+            (initget "G M R")
+            (setq opt (getkword "\nNervaduras [G GenerarNueva/M Modificar/R Regresar] <R>: "))
+            (cond
+              ((or (not opt) (= opt "R")) (setq done T))
+              ((= opt "G")
+               (ocmema:proj-ensure-generators-loaded)
+               (princ "\nOCMEMA: Ejecutando GEN_NERV...")
+               (ocmema:proj-run-gen-nerv)
+               (princ "\nOCMEMA: Regresando al menu...")
+               (setq done T)
+              )
+              ((= opt "M")
+               (ocmema:menu-modificar-nervadura)
+               (setq done T)
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+  (princ)
+)
+
+(defun ocmema:menu-modificar-nervadura (/ name rib opt dir)
+  (setq name (getstring T "\nNombre exacto de la nervadura: "))
+  (if (not name)
+    (ocmema:proj-cancelled)
+    (progn
+      (setq rib (ocmema:proj-find-rib name))
+      (if (not rib)
+        (ocmema:proj-log "Nervadura no existe.")
+        (progn
+          (initget "D N R")
+          (setq opt (getkword "\nModificar [D DireccionSoloTXT/N NuevoSTD/R Regresar] <R>: "))
+          (cond
+            ((or (not opt) (= opt "R")) nil)
+            ((= opt "D")
+             (initget "H V")
+             (setq dir (getkword "\nDireccion [H Horizontal/V Vertical] <H>: "))
+             (if (not dir) (setq dir "H"))
+             (ocmema:proj-upsert-rib
+               (list
+                 (cons "name" (ocmema:pio-assoc-get "name" rib))
+                 (cons "dir" dir)
+                 (cons "spacing" (ocmema:pio-assoc-get "spacing" rib))
+                 (cons "n_clear" (ocmema:pio-assoc-get "n_clear" rib))
+               )
+             )
+             (ocmema:proj-autosave)
+            )
+            ((= opt "N")
+             (setq ocmema:*rib-force-name* (ocmema:pio-assoc-get "name" rib))
+             (setq ocmema:*rib-single* T)
+             (ocmema:proj-ensure-generators-loaded)
+             (princ "\nOCMEMA: Ejecutando GEN_NERV...")
+             (ocmema:proj-run-gen-nerv)
+             (princ "\nOCMEMA: Regresando al menu...")
+            )
+          )
+        )
+      )
     )
   )
   (princ)
@@ -2157,6 +2338,7 @@
                                       (cons "units" nil)
                                       (cons "scale" nil)
                                       (cons "beams" '())
+                                      (cons "ribs" '())
                                       (cons "plants" plants)
                                     )
                                   )

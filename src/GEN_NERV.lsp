@@ -1,6 +1,7 @@
 (defun c:GEN_NERV (/ *error* file path dirPath fullPath numNerv jobName dateStr fc matName E_mod peralte capa_comp sep_nerv ancho_nerv 
                      nervName numClaros hasCantilever cantPos spanLengths coordList i spanLen 
-                     totalLen memberCount supportStr loadCount loadType loadVal d1 d2)
+                     totalLen memberCount supportStr loadCount loadType loadVal d1 d2
+                     projName units scale points rawLen dir delta)
 
   (vl-load-com)
 
@@ -17,16 +18,20 @@
 
   (princ "\n--- DATOS GENERALES DEL PROYECTO ---")
   
-  (setq numNerv (getint "\nCantidad de nervaduras a generar: "))
+  (if ocmema:*rib-single*
+    (setq numNerv 1)
+    (setq numNerv (getint "\nCantidad de nervaduras a generar: "))
+  )
   
   ;; Validación Nombre del Proyecto
-  (setq jobName "")
-  (while (or (= jobName "") (vl-string-search " " jobName))
-    (setq jobName (getstring "\nNombre del Proyecto (Sin espacios): "))
-    (if (vl-string-search " " jobName)
-      (princ "\nError: El nombre no puede contener espacios.")
-    )
+  (setq projName "")
+  (if ocmema:*project*
+    (setq projName (ocmema:pio-assoc-get "project_name" ocmema:*project*))
   )
+  (if (or (not projName) (= projName ""))
+    (setq projName "OCMEMA")
+  )
+  (setq jobName (vl-string-translate " " "_" projName))
 
   (setq dateStr (menucmd "M=$(edtime,$(getvar,date),DD-MON-YY)"))
   (princ (strcat "\nFecha detectada: " dateStr))
@@ -52,7 +57,10 @@
   (repeat numNerv
     (princ (strcat "\n\n--- CONFIGURANDO NERVADURA " (itoa n) " de " (itoa numNerv) " ---"))
     
-    (setq nervName (getstring "\nNombre de la nervadura (ej. N-1): "))
+    (if ocmema:*rib-force-name*
+      (setq nervName ocmema:*rib-force-name*)
+      (setq nervName (getstring "\nNombre de la nervadura (ej. N-1): "))
+    )
 
     ;; GESTIÓN DE GUARDADO DE ARCHIVO
     (if (= n 1)
@@ -83,7 +91,33 @@
         
         ;; 2. GEOMETRÍA
         (write-line "* --- GEOMETRIA Y NODOS ---" file)
-        (setq numClaros (getint "\nNumero de claros: "))
+        (initget "H V")
+        (setq dir (getkword "\nOCMEMA: Direccion de nervadura [H Horizontal/V Vertical] <H>: "))
+        (if (not dir) (setq dir "H"))
+        (setq points (ocmema:proj-capture-points))
+        (if (not points)
+          (progn (princ "\nOCMEMA: Captura cancelada.") (exit))
+        )
+        (setq numClaros (1- (length points)))
+        (setq units (ocmema:proj-get-units))
+        (setq scale (ocmema:proj-get-scale))
+        (if (or (not units) (not scale))
+          (progn
+            (setq delta (if (= dir "V")
+                          (abs (- (cadr (cadr points)) (cadr (car points))))
+                          (abs (- (car (cadr points)) (car (car points))))
+                        )
+            )
+            (setq rawLen delta)
+            (princ (strcat "\nOCMEMA: Claro 1 (sin convertir) = " (rtos rawLen 2 6)))
+            (initget "CM M MM")
+            (setq units (getkword "\nUnidades [CM/M/MM]: "))
+            (if (not units) (exit))
+            (setq scale (getreal "\nOCMEMA: Factor de escala (multiplicador) <1.0>: "))
+            (if (not scale) (setq scale 1.0))
+            (ocmema:proj-set-units-scale units scale)
+          )
+        )
         
         ;; LÓGICA DE VOLADIZOS CORREGIDA
         (setq cantPos "Ninguno")
@@ -106,9 +140,14 @@
         )
 
         (setq spanLengths '())
-        (setq i 1)
-        (repeat numClaros
-          (setq spanLen (getreal (strcat "\nLongitud del claro " (itoa i) " (cm): ")))
+        (setq i 0)
+        (while (< i numClaros)
+          (setq delta (if (= dir "V")
+                        (abs (- (cadr (nth (1+ i) points)) (cadr (nth i points))))
+                        (abs (- (car (nth (1+ i) points)) (car (nth i points))))
+                      )
+          )
+          (setq spanLen (* delta (ocmema:proj-unit-factor units) scale))
           (setq spanLengths (append spanLengths (list spanLen)))
           (setq i (1+ i))
         )
@@ -294,6 +333,19 @@
         (write-line "FINISH" file)
 
         (close file)
+        (if ocmema:*project*
+          (progn
+            (ocmema:proj-upsert-rib
+              (list
+                (cons "name" nervName)
+                (cons "dir" dir)
+                (cons "spacing" sep_nerv)
+                (cons "n_clear" numClaros)
+              )
+            )
+            (ocmema:proj-autosave)
+          )
+        )
         (princ (strcat "\nArchivo generado: " nervName))
       )
     )
