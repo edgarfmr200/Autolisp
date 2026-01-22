@@ -16,6 +16,16 @@
 ;; PROJECT_NAME, N_PLANTS, WALL_CM, NX, NY, X_NAMES, Y_NAMES
 ;; [PLANT n] ... PLANT_NAME, X_AXES, Y_AXES ... [/PLANT]
 (setq ocmema:*proj-debug* nil)
+(setq ocmema:*pl-beam-layer* "TRABE-PROY")
+(setq ocmema:*pl-centerline-layer* "TRABES")
+(setq ocmema:*pl-beam-color* 256)
+(setq ocmema:*pl-raw-layer* "OCMEMA_TRABES_RAW")
+(setq ocmema:*pl-center-layer* "OCMEMA_TRABES_CENTER")
+(setq ocmema:*pl-outline-layer* "TRABE-PROY")
+(setq OCM_DEBUG_DRAW nil)
+(setq *ocm_pts_reason* nil)
+(setq *ocm_anl_reason* nil)
+(setq *ocm_anl_sample* nil)
 
 ;; Logging (local, no dependencies)
 (defun ocmema:proj-log (msg /)
@@ -38,6 +48,522 @@
 
 (defun ocmema:proj-msg (msg /)
   (prompt (strcat "\nOCMEMA: " msg))
+)
+
+(defun ocmema:get-scale (proj / raw sc)
+  (setq raw (ocm-get proj "scale"))
+  (cond
+    ((numberp raw) (setq sc raw))
+    ((= (type raw) 'STR) (setq sc (ocmema:pio-to-number raw)))
+    (T (setq sc nil))
+  )
+  (if (or (not sc) (<= sc 0.0))
+    (progn
+      (ocmema:proj-warn "SCALE invalido o ausente; usando 1.0")
+      (setq sc 1.0)
+    )
+  )
+  sc
+)
+
+(defun ocm-k->sym (k / s r)
+  (cond
+    ((= (type k) 'SYM) k)
+    ((= (type k) 'STR)
+     (setq s (ocmema:str-trim k))
+     (if (= s "")
+       nil
+       (progn
+         (setq r (vl-catch-all-apply 'read (list s)))
+         (if (vl-catch-all-error-p r) nil r)
+       )
+     )
+    )
+    (T k)
+  )
+)
+
+(defun ocm-assoc-get (key alist / ksym kstr pair item target)
+  (setq pair nil)
+  (setq ksym (ocm-k->sym key))
+  (if ksym (setq pair (assoc ksym alist)))
+  (if (not pair)
+    (progn
+      (setq kstr
+        (cond
+          ((= (type key) 'STR) key)
+          ((= (type key) 'SYM) (vl-symbol-name key))
+          (T nil)
+        )
+      )
+      (if kstr
+        (progn
+          (setq pair (assoc kstr alist))
+          (if (not pair) (setq pair (assoc (strcase kstr) alist)))
+        )
+      )
+    )
+  )
+  (if (not pair)
+    (progn
+      (setq target (strcase (vl-princ-to-string key)))
+      (foreach item alist
+        (if (and (not pair) (listp item))
+          (if (= (strcase (vl-princ-to-string (car item))) target)
+            (setq pair item)
+          )
+        )
+      )
+    )
+  )
+  pair
+)
+
+(defun ocmema:alist-get-kv (alist key /)
+  (ocm-assoc-get key alist)
+)
+
+(defun ocmema:alist-get-any (alist key / kv)
+  (setq kv (ocm-assoc-get key alist))
+  (if kv (cdr kv) nil)
+)
+
+(defun ocm-get (alist key / kv)
+  (setq kv (ocm-assoc-get key alist))
+  (if kv (cdr kv) nil)
+)
+
+(defun ocmema:alist-keys (alist / out item)
+  (setq out '())
+  (if (and alist (listp alist))
+    (foreach item alist
+      (if (and (listp item) (car item))
+        (setq out (append out (list (car item))))
+      )
+    )
+  )
+  out
+)
+
+(defun ocmema:pl-name->str (v / s)
+  (cond
+    ((= (type v) 'STR) (setq s v))
+    ((= (type v) 'SYM) (setq s (vl-symbol-name v)))
+    (T (setq s (vl-princ-to-string v)))
+  )
+  (setq s (vl-string-translate " " "" s))
+  (strcase s)
+)
+
+(defun ocmema:pl-safe-apply (step fn args / r)
+  (setq r (vl-catch-all-apply fn args))
+  (if (vl-catch-all-error-p r)
+    (progn
+      (ocmema:proj-log (strcat "Error en " step ": " (vl-catch-all-error-message r)))
+      nil
+    )
+    r
+  )
+)
+
+(defun ocmema:pl-ensure-layer (name color / rec)
+  (if (not (tblsearch "LAYER" name))
+    (entmake (list (cons 0 "LAYER") (cons 2 name) (cons 70 0) (cons 62 color)))
+  )
+)
+
+(defun ocmema:pl-valid-points-p (pts / ok p)
+  (setq ok T)
+  (if (and pts (listp pts))
+    (foreach p pts
+      (if ok
+        (if (and (listp p)
+                 (>= (length p) 2)
+                 (numberp (car p))
+                 (numberp (cadr p)))
+          nil
+          (setq ok nil)
+        )
+      )
+    )
+    (setq ok nil)
+  )
+  ok
+)
+
+(defun ocmema:pl-normalize-points (pts / out)
+  (setq out pts)
+  (if (and pts (listp pts) (numberp (car pts)) (numberp (cadr pts)))
+    (setq out (ocmema:pl-flat->points pts))
+  )
+  out
+)
+
+(defun ocm-pts-valid-p (pts / ok p)
+  (setq *ocm_pts_reason* nil)
+  (cond
+    ((not (and pts (listp pts)))
+     (setq *ocm_pts_reason* "points_raw no es lista")
+     nil
+    )
+    ((< (length pts) 2)
+     (setq *ocm_pts_reason* "menos de 2 puntos")
+     nil
+    )
+    (T
+      (setq ok T)
+      (foreach p pts
+        (if ok
+          (if (and (listp p)
+                   (>= (length p) 2)
+                   (numberp (car p))
+                   (numberp (cadr p)))
+            nil
+            (progn
+              (setq ok nil)
+              (setq *ocm_pts_reason* "punto invalido (no numerico)")
+            )
+          )
+        )
+      )
+      ok
+    )
+  )
+)
+
+(defun ocmema:pl-infer-beam-name (path / base)
+  (if (and path (/= path ""))
+    (setq base (vl-filename-base path))
+  )
+  base
+)
+
+(defun ocmema:pl-list-anl-files (folder / files)
+  (if (and folder (/= folder ""))
+    (setq files (vl-directory-files folder "*.ANL" 1))
+  )
+  files
+)
+
+(defun ocmema:pl-find-number-in-string (s / i ch start out)
+  (setq out nil)
+  (setq i 1)
+  (setq start nil)
+  (while (and (<= i (strlen s)) (not start))
+    (setq ch (substr s i 1))
+    (if (or (and (>= ch "0") (<= ch "9")) (= ch "-") (= ch "+"))
+      (setq start i)
+    )
+    (setq i (1+ i))
+  )
+  (if start
+    (progn
+      (setq i start)
+      (while (and (<= i (strlen s))
+                  (wcmatch (substr s i 1) "[0-9.+-]"))
+        (setq i (1+ i))
+      )
+      (setq out (substr s start (- i start)))
+    )
+  )
+  out
+)
+
+(defun ocmema:anl-extract-widths-cm (path / lines line num widths tokens idx tok)
+  (setq widths '())
+  (setq *ocm_anl_reason* nil)
+  (setq *ocm_anl_sample* nil)
+  (if (and path (/= path "") (setq lines (ocmema:pio-read-lines path)))
+    (foreach line lines
+      (setq tokens (ocmema:pio-split-list line " "))
+      (setq idx 0)
+      (while (< idx (length tokens))
+        (setq tok (strcase (nth idx tokens)))
+        (if (or (= tok "ZD") (= tok "ZB"))
+          (progn
+            (setq num (ocmema:pio-to-number (nth (1+ idx) tokens)))
+            (if num
+              (progn
+                (setq *ocm_anl_sample* line)
+                (setq widths (append widths (list num)))
+              )
+            )
+          )
+        )
+        (setq idx (1+ idx))
+      )
+    )
+  )
+  (if (not widths)
+    (setq *ocm_anl_reason* "No se encontro Width en ANL")
+  )
+  widths
+)
+
+(defun ocmema:pl-find-beam-by-name-pure (name beams / norm item found iname)
+  (setq found nil)
+  (if (and name beams (listp beams))
+    (progn
+      (setq norm (ocmema:pl-name->str name))
+      (foreach item beams
+        (if (not found)
+          (progn
+            (setq iname (ocm-get item "name"))
+            (if (= (ocmema:pl-name->str iname) norm)
+              (setq found item)
+            )
+          )
+        )
+      )
+    )
+  )
+  found
+)
+
+(defun ocmema:pl-flat->points (lst / out)
+  (setq out '())
+  (while (and lst (cdr lst))
+    (setq out (append out (list (list (car lst) (cadr lst)))))
+    (setq lst (cddr lst))
+  )
+  out
+)
+
+(defun ocmema:pt2d (p)
+  (list (car p) (cadr p))
+)
+
+(defun ocm-vec-add (a b)
+  (list (+ (car a) (car b)) (+ (cadr a) (cadr b)))
+)
+
+(defun ocm-vec-sub (a b)
+  (list (- (car a) (car b)) (- (cadr a) (cadr b)))
+)
+
+(defun ocm-vec-scale (v s)
+  (list (* (car v) s) (* (cadr v) s))
+)
+
+(defun ocm-vec-len (v)
+  (sqrt (+ (* (car v) (car v)) (* (cadr v) (cadr v))))
+)
+
+(defun ocm-vec-unit (v / l)
+  (setq l (ocm-vec-len v))
+  (if (> l 1e-9)
+    (ocm-vec-scale v (/ 1.0 l))
+    (list 0.0 0.0)
+  )
+)
+
+(defun ocm-perp-left (v)
+  (list (- (cadr v)) (car v))
+)
+
+(defun ocmema:pl-seg-normal (p0 p1)
+  (ocm-vec-unit (ocm-perp-left (ocm-vec-sub p1 p0)))
+)
+
+(defun ocmema:offset-polyline-const (pts d / n i p0 p1 p2 n0 n1 nsum out)
+  (setq out '())
+  (setq n (length pts))
+  (if (>= n 2)
+    (progn
+      (setq p0 (ocmema:pt2d (nth 0 pts)))
+      (setq p1 (ocmema:pt2d (nth 1 pts)))
+      (setq n0 (ocmema:pl-seg-normal p0 p1))
+      (setq out (append out (list (ocm-vec-add p0 (ocm-vec-scale n0 d)))))
+      (setq i 1)
+      (while (< i (1- n))
+        (setq p0 (ocmema:pt2d (nth (1- i) pts)))
+        (setq p1 (ocmema:pt2d (nth i pts)))
+        (setq p2 (ocmema:pt2d (nth (1+ i) pts)))
+        (setq n0 (ocmema:pl-seg-normal p0 p1))
+        (setq n1 (ocmema:pl-seg-normal p1 p2))
+        (setq nsum (ocm-vec-unit (ocm-vec-add n0 n1)))
+        (setq out (append out (list (ocm-vec-add p1 (ocm-vec-scale nsum d)))))
+        (setq i (1+ i))
+      )
+      (setq p0 (ocmema:pt2d (nth (- n 2) pts)))
+      (setq p1 (ocmema:pt2d (nth (- n 1) pts)))
+      (setq n0 (ocmema:pl-seg-normal p0 p1))
+      (setq out (append out (list (ocm-vec-add p1 (ocm-vec-scale n0 d)))))
+    )
+  )
+  out
+)
+
+(defun ocmema:offset-polyline-var (pts widths sign / out i p0 p1 n d)
+  (setq out '())
+  (setq i 0)
+  (while (< i (1- (length pts)))
+    (setq p0 (ocmema:pt2d (nth i pts)))
+    (setq p1 (ocmema:pt2d (nth (1+ i) pts)))
+    (setq n (ocmema:pl-seg-normal p0 p1))
+    (setq d (* sign (/ (nth i widths) 2.0)))
+    (if (= i 0)
+      (setq out (append out (list (ocm-vec-add p0 (ocm-vec-scale n d)))))
+    )
+    (setq out (append out (list (ocm-vec-add p1 (ocm-vec-scale n d)))))
+    (setq i (1+ i))
+  )
+  out
+)
+
+(defun ocmema:draw-lwpoly (pts closed layer color / data n)
+  (setq n (length pts))
+  (if (>= n 2)
+    (progn
+      (ocmema:pl-ensure-layer layer color)
+      (setq data
+        (append
+          (list
+            (cons 0 "LWPOLYLINE")
+            (cons 100 "AcDbEntity")
+            (cons 8 layer)
+            (cons 62 color)
+            (cons 100 "AcDbPolyline")
+            (cons 90 n)
+            (cons 70 (if closed 1 0))
+          )
+          (mapcar '(lambda (pt) (cons 10 (ocmema:pt2d pt))) pts)
+        )
+      )
+      (entmakex data)
+    )
+  )
+)
+
+(defun ocmema:pl-units-factor (units / u)
+  (setq u (strcase (if units units "")))
+  (cond
+    ((= u "M") 0.01)
+    ((= u "MM") 10.0)
+    (T 1.0)
+  )
+)
+
+(defun ocmema:cm->draw (cm scale / m sc)
+  (setq sc scale)
+  (if (or (not sc) (= sc 0.0)) (setq sc 1.0))
+  (setq m (/ cm 100.0))
+  (/ m sc)
+)
+
+(defun ocmema:pl-widths-cm->draw (widths units scale / out w)
+  (setq out '())
+  (foreach w widths
+    (if (numberp w)
+      (setq out (append out (list (ocmema:cm->draw w scale))))
+    )
+  )
+  out
+)
+
+(defun ocmema:pl-cm-to-draw (cm units scale /)
+  (if (numberp cm)
+    (ocmema:cm->draw cm scale)
+    0.0
+  )
+)
+
+(defun ocmema:pl-wall-ext-draw (wall_cm units scale / ext_cm)
+  (setq ext_cm (/ wall_cm 2.0))
+  (ocmema:cm->draw ext_cm scale)
+)
+
+(defun ocmema:pl-get-extents (mode wall_cm units scale / ext_ini ext_fin)
+  (cond
+    ((= mode "M")
+     (setq ext_ini (getreal "\nExt ini (cm): "))
+     (setq ext_fin (getreal "\nExt fin (cm): "))
+     (if (not ext_ini) (setq ext_ini 0.0))
+     (if (not ext_fin) (setq ext_fin 0.0))
+     (setq ext_ini (ocmema:pl-cm-to-draw ext_ini units scale))
+     (setq ext_fin (ocmema:pl-cm-to-draw ext_fin units scale))
+    )
+    (T
+     (setq ext_ini (ocmema:pl-wall-ext-draw wall_cm units scale))
+     (setq ext_fin ext_ini)
+    )
+  )
+  (list ext_ini ext_fin)
+)
+
+(defun ocmema:pl-extend-seg (p0 p1 ext0 ext1 / d)
+  (setq d (ocm-vec-unit (ocm-vec-sub p1 p0)))
+  (list
+    (ocm-vec-sub p0 (ocm-vec-scale d ext0))
+    (ocm-vec-add p1 (ocm-vec-scale d ext1))
+  )
+)
+
+(defun ocmema:pl-extend-poly-ends (pts ext_ini ext_fin / n p0 p1 pN1 pN d0 dN out)
+  (setq n (length pts))
+  (if (< n 2)
+    pts
+    (progn
+      (setq p0 (nth 0 pts))
+      (setq p1 (nth 1 pts))
+      (setq pN1 (nth (- n 2) pts))
+      (setq pN (nth (1- n) pts))
+      (setq d0 (ocm-vec-unit (ocm-vec-sub p1 p0)))
+      (setq dN (ocm-vec-unit (ocm-vec-sub pN pN1)))
+      (setq out (list (ocm-vec-sub p0 (ocm-vec-scale d0 ext_ini))))
+      (if (> n 2)
+        (setq out (append out (ocmema:pio-sublist pts 1 (1- n))))
+      )
+      (setq out (append out (list (ocm-vec-add pN (ocm-vec-scale dN ext_fin)))))
+      out
+    )
+  )
+)
+
+(defun ocmema:pl-extend-ends-dir (pts dir ext_ini ext_fin / out p0 pN)
+  (if (and pts (>= (length pts) 2))
+    (progn
+      (setq out pts)
+      (setq p0 (car out))
+      (setq pN (nth (1- (length out)) out))
+      (setq out (subst (ocm-vec-sub p0 (ocm-vec-scale dir ext_ini)) p0 out))
+      (setq out (subst (ocm-vec-add pN (ocm-vec-scale dir ext_fin)) pN out))
+      out
+    )
+    pts
+  )
+)
+(defun ocmema:pl-build-rect (edge1 edge2 / p0 p1 p2 p3)
+  (setq p0 (car edge1))
+  (setq p1 (cadr edge1))
+  (setq p2 (cadr edge2))
+  (setq p3 (car edge2))
+  (list p0 p1 p2 p3)
+)
+
+(defun ocmema:pl-centerline-from-align (pts align w / a d sign)
+  (setq a (strcase (if align align "")))
+  (cond
+    ((or (= a "") (= a "C")) pts)
+    ((or (= a "I") (= a "D"))
+     (setq sign (if (= a "I") -1.0 1.0))
+     (setq d (* sign (/ w 2.0)))
+     (ocmema:offset-polyline-const pts d)
+    )
+    (T pts)
+  )
+)
+
+(defun ocmema:pl-build-outline-const (center w / left right)
+  (setq left (ocmema:offset-polyline-const center (/ w 2.0)))
+  (setq right (ocmema:offset-polyline-const center (/ (- w) 2.0)))
+  (append left (reverse right))
+)
+
+(defun ocmema:pl-build-outline-var (center widths / left right)
+  (setq left (ocmema:offset-polyline-var center widths 1.0))
+  (setq right (ocmema:offset-polyline-var center widths -1.0))
+  (append left (reverse right))
 )
 
 (defun ocmema:proj-axes-complete-p (/ proj plants nx ny ok plant x_axes y_axes item)
@@ -101,11 +627,11 @@
 )
 
 (defun ocmema:proj-get-beams (/)
-  (ocmema:pio-assoc-get "beams" ocmema:*project*)
+  (ocm-get ocmema:*project* "beams")
 )
 
 (defun ocmema:proj-get-ribs (/)
-  (ocmema:pio-assoc-get "ribs" ocmema:*project*)
+  (ocm-get ocmema:*project* "ribs")
 )
 
 (defun ocmema:proj-rib-name-exists (name / ribs item found norm)
@@ -240,10 +766,9 @@
   (if (and unit (/= unit "")) unit nil)
 )
 
-(defun ocmema:proj-get-scale (/ proj sc)
+(defun ocmema:proj-get-scale (/ proj)
   (setq proj ocmema:*project*)
-  (setq sc (ocmema:pio-assoc-get "scale" proj))
-  (if (numberp sc) sc nil)
+  (ocmema:get-scale proj)
 )
 
 (defun ocmema:proj-set-units-scale (unit scale / proj)
@@ -908,7 +1433,7 @@
 
 ;; Assoc helpers
 (defun ocmema:pio-assoc-get (key alist / pair)
-  (setq pair (assoc key alist))
+  (setq pair (ocm-assoc-get key alist))
   (if pair (cdr pair) nil)
 )
 
@@ -1247,7 +1772,7 @@
 (defun ocmema:pio-load-project-lines (lines / len i line vline key val kv
                                             in-plant plant-index plant-name x-axes y-axes
                                             in-beam beam-index beam-name beam-plant-idx beam-plant-name
-                                            beam-npoints beam-unit beam-std-path beam-points
+                                            beam-npoints beam-align beam-unit beam-std-path beam-points
                                             in-units units scale
                                             in-beams in-ribs
                                             ribs rib-name rib-dir rib-spacing rib-nclear
@@ -1283,6 +1808,7 @@
         (setq beam-plant-idx 0)
         (setq beam-plant-name "")
         (setq beam-npoints 0)
+        (setq beam-align "")
         (setq beam-unit "")
         (setq beam-std-path "")
         (setq beam-points '())
@@ -1365,6 +1891,7 @@
                             (cons "plant_idx" beam-plant-idx)
                             (cons "plant_name" beam-plant-name)
                             (cons "n_points" beam-npoints)
+                            (cons "align" beam-align)
                             (cons "unit" beam-unit)
                             (cons "std_path" beam-std-path)
                             (cons "points_raw" beam-points)
@@ -1378,6 +1905,7 @@
                     (setq beam-plant-idx 0)
                     (setq beam-plant-name "")
                     (setq beam-npoints 0)
+                    (setq beam-align "")
                     (setq beam-unit "")
                     (setq beam-std-path "")
                     (setq beam-points '())
@@ -1419,6 +1947,7 @@
                 (setq beam-plant-idx 0)
                 (setq beam-plant-name "")
                 (setq beam-npoints 0)
+                (setq beam-align "")
                 (setq beam-unit "")
                 (setq beam-std-path "")
                 (setq beam-points '())
@@ -1444,13 +1973,23 @@
                    (progn
                      (setq beam-name (nth 1 kv))
                      (setq beam-npoints (atoi (nth 2 kv)))
-                     (setq beam-points (ocmema:pio-parse-points2d (nth 3 kv)))
+                     (if (>= (length kv) 5)
+                       (progn
+                         (setq beam-align (nth 3 kv))
+                         (setq beam-points (ocmema:pio-parse-points2d (nth 4 kv)))
+                       )
+                       (progn
+                         (setq beam-align "")
+                         (setq beam-points (ocmema:pio-parse-points2d (nth 3 kv)))
+                       )
+                     )
                      (setq beams
                        (append beams
                          (list
                            (list
                              (cons "name" beam-name)
                              (cons "n_points" beam-npoints)
+                             (cons "align" beam-align)
                              (cons "points_raw" beam-points)
                            )
                          )
@@ -1504,6 +2043,7 @@
                              ((= key "PLANT_IDX") (setq beam-plant-idx (atoi val)))
                              ((= key "PLANT_NAME") (setq beam-plant-name val))
                              ((= key "N_POINTS") (setq beam-npoints (atoi val)))
+                             ((= key "ALIGN") (setq beam-align val))
                              ((= key "UNIT") (setq beam-unit val))
                              ((= key "STD_PATH") (setq beam-std-path val))
                              ((= key "POINTS") (setq beam-points (ocmema:pio-parse-points val)))
@@ -1576,6 +2116,7 @@
                     (cons "plant_idx" beam-plant-idx)
                     (cons "plant_name" beam-plant-name)
                     (cons "n_points" beam-npoints)
+                    (cons "align" beam-align)
                     (cons "unit" beam-unit)
                     (cons "std_path" beam-std-path)
                     (cons "points_raw" beam-points)
@@ -2235,7 +2776,304 @@
     (cond
       ((or (not opt) (= opt "R")) (setq done T))
       ((= opt "A") (ocmema:proj-log "Pendiente: Dibujar Armados"))
-      ((= opt "P") (ocmema:proj-log "Pendiente: Dibujar Planta"))
+      ((= opt "P") (ocmema:menu-dibujar-planta))
+    )
+  )
+  (princ)
+)
+
+(defun ocmema:menu-dibujar-planta (/ opt done)
+  (setq done nil)
+  (while (not done)
+    (initget "T R")
+    (setq opt (getkword "\nPlanta [T Trabes/R Regresar] <R>: "))
+    (cond
+      ((or (not opt) (= opt "R")) (setq done T))
+      ((= opt "T") (ocmema:menu-dibujar-planta-trabes))
+    )
+  )
+  (princ)
+)
+
+(defun ocmema:pl-project-beams-valid-p (/ proj beams)
+  (setq proj ocmema:*project*)
+  (if (and proj (listp proj))
+    (progn
+      (setq beams (ocmema:proj-get-beams))
+      (if (and beams (listp beams)) T nil)
+    )
+    nil
+  )
+)
+
+(defun ocmema:pl-anl-exists-p (name files / target f found)
+  (setq found nil)
+  (if (and name files (listp files))
+    (progn
+      (setq target (strcase (strcat (ocmema:pl-name->str name) ".ANL")))
+      (foreach f files
+        (if (= (strcase f) target)
+          (setq found T)
+        )
+      )
+    )
+  )
+  found
+)
+
+(defun ocmema:pl-draw-beam (beam widths_cm anlPath ext_mode ext_ini ext_fin / name align kv points pnorm keys units scale wall_cm widths_draw w_used base center edge1 edge2 rect dir normal_left normal_right ext_cm ext_draw offset_draw p0 pN nPts mode align_note w_list
+                              i n wi pA0 pA1 pB0 pB1 prevA0 prevA1 prevB0 prevB1 ipA ipB side_plus side_minus)
+  (setq name (ocm-get beam "name"))
+  (setq align (ocm-get beam "align"))
+  (setq kv (ocm-assoc-get "points_raw" beam))
+  (setq points (if kv (cdr kv) nil))
+  (setq pnorm (ocmema:pl-normalize-points points))
+  (setq units (ocmema:pio-assoc-get "units" ocmema:*project*))
+  (setq scale (ocmema:get-scale ocmema:*project*))
+  (setq wall_cm (ocmema:pio-assoc-get "wall_cm" ocmema:*project*))
+  (if (and (not kv) (not points))
+    (setq *ocm_pts_reason* "points_raw no encontrado")
+  )
+  (if (not (ocm-pts-valid-p pnorm))
+    (progn
+      (setq keys (ocmema:alist-keys beam))
+      (ocmema:proj-warn
+        (strcat
+          "Trabe " (if name (vl-princ-to-string name) "<sin nombre>")
+          " sin puntos validos (razon: " (if *ocm_pts_reason* *ocm_pts_reason* "desconocida") ")."
+        )
+      )
+      (princ "\nOCMEMA DBG: keys=")
+      (princ keys)
+      (princ " points_raw_type=")
+      (princ (type points))
+      nil
+    )
+    (progn
+      (setq widths_draw (ocmema:pl-widths-cm->draw widths_cm units scale))
+      (if (or (not widths_draw) (= (length widths_draw) 0))
+        (progn
+          (ocmema:proj-warn
+            (strcat "ANL sin Width valido. " (if *ocm_anl_reason* *ocm_anl_reason* "") " "
+                    (if *ocm_anl_sample* *ocm_anl_sample* ""))
+          )
+          (setq w_used nil)
+        )
+        (progn
+          (if (and (> (length widths_draw) 1) (/= (length widths_draw) (1- (length pnorm))))
+            (progn
+              (ocmema:proj-warn "Widths ANL no coinciden con numero de tramos; usando primer width.")
+              (setq widths_draw (list (car widths_draw)))
+            )
+          )
+          (setq w_used (car widths_draw))
+        )
+      )
+      (setq ext_cm (if (numberp wall_cm) (/ wall_cm 2.0) 0.0))
+      (setq ext_draw (if (numberp wall_cm) (ocmema:cm->draw ext_cm scale) 0.0))
+      (setq offset_draw (if (numberp w_used) (/ w_used 2.0) 0.0))
+      (setq nPts (length pnorm))
+      (setq mode (if (and widths_draw (> (length widths_draw) 1)) "pline" "rect"))
+      (setq align_note "")
+      (if (or (not w_used) (< (length pnorm) 2))
+        (progn
+          (ocmema:proj-warn "Width invalido o puntos insuficientes; no se dibuja.")
+          nil
+        )
+        (progn
+          (setq base (mapcar 'ocmema:pt2d pnorm))
+          (setq p0 (car base))
+          (setq pN (nth (1- (length base)) base))
+          (setq dir (ocm-vec-unit (ocm-vec-sub pN p0)))
+          (setq normal_left (list (- (cadr dir)) (car dir)))
+          (setq normal_right (list (cadr dir) (- (car dir))))
+
+          (cond
+            ((or (= (strcase (if align align "")) "") (= (strcase (if align align "")) "C"))
+             (setq center base)
+             (setq align_note "centerline=border_ref (C)")
+            )
+            ((= (strcase (if align align "")) "I")
+             (setq center (mapcar '(lambda (pt) (ocm-vec-add pt (ocm-vec-scale normal_right (/ w_used 2.0)))) base))
+             (setq align_note "reconstructed centerline from border using normal_right")
+            )
+            ((= (strcase (if align align "")) "D")
+             (setq center (mapcar '(lambda (pt) (ocm-vec-add pt (ocm-vec-scale normal_left (/ w_used 2.0)))) base))
+             (setq align_note "reconstructed centerline from border using normal_left")
+            )
+            (T
+             (setq center base)
+             (setq align_note "centerline=border_ref (C)")
+            )
+          )
+
+          (if (= mode "rect")
+            (progn
+              (setq edge1 (mapcar '(lambda (pt) (ocm-vec-sub pt (ocm-vec-scale normal_right (/ w_used 2.0)))) center))
+              (setq edge2 (mapcar '(lambda (pt) (ocm-vec-add pt (ocm-vec-scale normal_right (/ w_used 2.0)))) center))
+              (setq edge1 (ocmema:pl-extend-ends-dir edge1 dir ext_ini ext_fin))
+              (setq edge2 (ocmema:pl-extend-ends-dir edge2 dir ext_ini ext_fin))
+              (setq rect (append edge1 (reverse edge2)))
+            )
+            (progn
+              (setq n (1- (length center)))
+              (if (and widths_draw (= (length widths_draw) n))
+                (setq w_list widths_draw)
+                (progn
+                  (setq w_list '())
+                  (repeat n (setq w_list (append w_list (list w_used))))
+                )
+              )
+              (setq side_plus '())
+              (setq side_minus '())
+              (setq i 0)
+              (while (< i n)
+                (setq wi (nth i w_list))
+                (setq pA0 (nth i center))
+                (setq pA1 (nth (1+ i) center))
+                (setq dir (ocm-vec-unit (ocm-vec-sub pA1 pA0)))
+                (setq normal_right (list (cadr dir) (- (car dir))))
+                (setq pB0 (ocm-vec-add pA0 (ocm-vec-scale normal_right (/ wi 2.0))))
+                (setq pB1 (ocm-vec-add pA1 (ocm-vec-scale normal_right (/ wi 2.0))))
+                (setq pA0 (ocm-vec-sub pA0 (ocm-vec-scale normal_right (/ wi 2.0))))
+                (setq pA1 (ocm-vec-sub pA1 (ocm-vec-scale normal_right (/ wi 2.0))))
+                (if (= i 0)
+                  (progn
+                    (setq side_plus (append side_plus (list pB0)))
+                    (setq side_minus (append side_minus (list pA0)))
+                  )
+                  (progn
+                    (setq ipA (inters prevB0 prevB1 pB0 pB1 nil))
+                    (setq ipB (inters prevA0 prevA1 pA0 pA1 nil))
+                    (setq side_plus (append side_plus (list (if ipA ipA prevB1))))
+                    (setq side_minus (append side_minus (list (if ipB ipB prevA1))))
+                  )
+                )
+                (setq prevB0 pB0)
+                (setq prevB1 pB1)
+                (setq prevA0 pA0)
+                (setq prevA1 pA1)
+                (setq i (1+ i))
+              )
+              (setq side_plus (append side_plus (list prevB1)))
+              (setq side_minus (append side_minus (list prevA1)))
+              (setq side_plus (ocmema:pl-extend-ends-dir side_plus (ocm-vec-unit (ocm-vec-sub pN p0)) ext_ini ext_fin))
+              (setq side_minus (ocmema:pl-extend-ends-dir side_minus (ocm-vec-unit (ocm-vec-sub pN p0)) ext_ini ext_fin))
+              (setq rect (append side_plus (reverse side_minus)))
+            )
+          )
+
+          (princ
+            (strcat
+              "\nOCMEMA DBG: beam=" (if name (vl-princ-to-string name) "<sin nombre>")
+              " align=" (if align align "")
+              " wall_cm=" (vl-princ-to-string (if wall_cm wall_cm 0.0))
+              " ext_cm=" (vl-princ-to-string ext_cm)
+              " ext_draw=" (vl-princ-to-string ext_draw)
+              " scale=" (vl-princ-to-string scale)
+              " widths_draw=" (vl-princ-to-string widths_draw)
+              " nPts=" (vl-princ-to-string nPts)
+              " mode=" mode
+              " offset_sign_info=" align_note
+            )
+          )
+
+          (ocmema:draw-lwpoly center nil ocmema:*pl-centerline-layer* ocmema:*pl-beam-color*)
+          (ocmema:draw-lwpoly rect T ocmema:*pl-outline-layer* ocmema:*pl-beam-color*)
+        )
+      )
+      T
+    )
+  )
+)
+
+(defun ocmema:menu-dibujar-planta-trabes-una (/ path name beams beam widths mode ext ext_ini ext_fin wall_cm scale)
+  (setq path (getfiled "Selecciona ANL de trabe" ocmema:*proj-default-dir* "ANL" 0))
+  (if (not path)
+    (ocmema:proj-cancelled)
+    (progn
+      (setq name (ocmema:pl-infer-beam-name path))
+      (setq beams (ocmema:proj-get-beams))
+      (if (not name)
+        (ocmema:proj-log "No se pudo inferir nombre de trabe.")
+        (progn
+          (setq beam (ocmema:pl-find-beam-by-name-pure name beams))
+          (if (not beam)
+            (ocmema:proj-log (strcat "Trabe " name " no encontrada en proyecto."))
+            (progn
+              (initget "A M")
+              (setq mode (getkword "\nExtension extremos [A Auto/M Manual] <A>: "))
+              (if (not mode) (setq mode "A"))
+              (setq wall_cm (ocmema:pio-assoc-get "wall_cm" ocmema:*project*))
+              (setq scale (ocmema:get-scale ocmema:*project*))
+              (setq ext (ocmema:pl-get-extents mode wall_cm (ocmema:pio-assoc-get "units" ocmema:*project*) scale))
+              (setq ext_ini (car ext))
+              (setq ext_fin (cadr ext))
+              (setq widths (ocmema:anl-extract-widths-cm path))
+              (if (ocmema:pl-draw-beam beam widths path mode ext_ini ext_fin)
+                (ocmema:proj-log (strcat "Trabe " name " dibujada."))
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+)
+
+(defun ocmema:menu-dibujar-planta-trabes-todas (/ beams total drawn sample folder files beam name path widths)
+  (setq beams (ocmema:proj-get-beams))
+  (if (not (and beams (listp beams)))
+    (ocmema:proj-log "No hay trabes en el proyecto.")
+    (progn
+      (setq total (length beams))
+      (setq drawn 0)
+      (setq sample (getfiled "Selecciona ANL para ubicar carpeta (opcional)" ocmema:*proj-default-dir* "ANL" 0))
+      (if sample
+        (progn
+          (setq folder (vl-filename-directory sample))
+          (setq files (ocmema:pl-list-anl-files folder))
+        )
+      )
+      (foreach beam beams
+        (setq name (ocm-get beam "name"))
+        (if (and files (not (ocmema:pl-anl-exists-p name files)))
+          (ocmema:proj-warn (strcat "ANL faltante para trabe " (vl-princ-to-string name) "."))
+        )
+        (setq widths nil)
+        (if (and files (ocmema:pl-anl-exists-p name files))
+          (progn
+            (setq path (strcat folder "\\" (vl-princ-to-string name) ".ANL"))
+            (setq widths (ocmema:pl-parse-anl-widths path))
+          )
+        )
+        (if (ocmema:pl-draw-beam beam widths path "A" 0.0 0.0)
+          (setq drawn (1+ drawn))
+        )
+      )
+      (ocmema:proj-log (strcat "Dibujadas " (itoa drawn) " de " (itoa total) " trabes."))
+    )
+  )
+)
+
+(defun ocmema:menu-dibujar-planta-trabes (/ opt done)
+  (if (not (ocmema:pl-project-beams-valid-p))
+    (ocmema:proj-log "Proyecto invalido o sin trabes.")
+    (progn
+      (setq done nil)
+      (while (not done)
+        (initget "U A R")
+        (setq opt (getkword "\nTrabes Planta [U Una/A Todas/R Regresar] <R>: "))
+        (cond
+          ((or (not opt) (= opt "R")) (setq done T))
+          ((= opt "U")
+           (ocmema:pl-safe-apply "dibujar trabe (una)" 'ocmema:menu-dibujar-planta-trabes-una '())
+          )
+          ((= opt "A")
+           (ocmema:pl-safe-apply "dibujar trabes (todas)" 'ocmema:menu-dibujar-planta-trabes-todas '())
+          )
+        )
+      )
     )
   )
   (princ)
