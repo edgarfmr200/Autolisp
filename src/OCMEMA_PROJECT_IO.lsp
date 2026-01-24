@@ -411,7 +411,7 @@
   out
 )
 
-(defun ocmema:draw-lwpoly (pts closed layer color / data n)
+(defun ocmema:draw-lwpoly (pts closed layer color / data n ename)
   (setq n (length pts))
   (if (>= n 2)
     (progn
@@ -430,9 +430,265 @@
           (mapcar '(lambda (pt) (cons 10 (ocmema:pt2d pt))) pts)
         )
       )
-      (entmakex data)
+      (setq ename (entmakex data))
+      ename
     )
   )
+)
+
+(defun ocmema:dxf-set (dxf pair / key)
+  (setq key (car pair))
+  (if (assoc key dxf)
+    (subst pair (assoc key dxf) dxf)
+    (append dxf (list pair))
+  )
+)
+
+(defun ocmema:safe-entmod (ename pairs / r d p)
+  (setq r (vl-catch-all-apply 'entget (list ename)))
+  (if (vl-catch-all-error-p r)
+    (progn
+      (ocmema:proj-warn (strcat "OCMEMA WARN: entget falló: " (vl-catch-all-error-message r)))
+      nil
+    )
+    (progn
+      (setq d r)
+      (foreach p pairs (setq d (ocmema:dxf-set d p)))
+      (setq r (vl-catch-all-apply 'entmod (list d)))
+      (if (vl-catch-all-error-p r)
+        (progn
+          (ocmema:proj-warn (strcat "OCMEMA WARN: entmod falló: " (vl-catch-all-error-message r)))
+          nil
+        )
+        T
+      )
+    )
+  )
+)
+
+(defun ocmema:safe-entmakex (dxf / r)
+  (setq r (vl-catch-all-apply 'entmakex (list dxf)))
+  (if (vl-catch-all-error-p r)
+    (progn
+      (ocmema:proj-warn (strcat "OCMEMA WARN: entmakex falló: " (vl-catch-all-error-message r)))
+      nil
+    )
+    r
+  )
+)
+
+(defun ocmema:make-arrow-solid (p1 p2 / dir perp base pA pB)
+  (setq dir (ocm-vec-unit (ocm-vec-sub p2 p1)))
+  (setq perp (list (- (cadr dir)) (car dir)))
+  (setq base (ocm-vec-add p1 (ocm-vec-scale dir 0.1)))
+  (setq pA (ocm-vec-add base (ocm-vec-scale perp 0.05)))
+  (setq pB (ocm-vec-sub base (ocm-vec-scale perp 0.05)))
+  (ocmema:safe-entmakex
+    (list
+      (cons 0 "SOLID")
+      (cons 100 "AcDbEntity")
+      (cons 8 ocmema:*pl-centerline-layer*)
+      (cons 62 7)
+      (cons 100 "AcDbTrace")
+      (cons 10 (ocmema:pt2d p1))
+      (cons 11 (ocmema:pt2d pA))
+      (cons 12 (ocmema:pt2d pB))
+      (cons 13 (ocmema:pt2d pB))
+    )
+  )
+)
+
+(defun ocmema:safe-leader (p1 p2 p3 / oldblk prev en r)
+  (setq oldblk (getvar "DIMBLK"))
+  (setq prev (entlast))
+  (setvar "DIMBLK" "_CLOSED")
+  (setq r (vl-catch-all-apply '(lambda () (command "_.LEADER" p1 p2 p3 "" "N"))))
+  (setvar "DIMBLK" oldblk)
+  (if (vl-catch-all-error-p r)
+    nil
+    (progn
+      (setq en (entlast))
+      (if (and en (not (eq en prev)) (= (cdr (assoc 0 (entget en))) "LEADER"))
+        (progn
+          (ocmema:safe-entmod en (list (cons 8 "TRABES") (cons 62 7)))
+          en
+        )
+        nil
+      )
+    )
+  )
+)
+
+(defun ocmema:pl-center-midpoint (ent / dxf typ p0 p1 pts)
+  (if (and ent (= (type ent) 'ENAME))
+    (progn
+      (setq dxf (entget ent))
+      (setq typ (cdr (assoc 0 dxf)))
+      (cond
+        ((= typ "LINE")
+         (setq p0 (cdr (assoc 10 dxf)))
+         (setq p1 (cdr (assoc 11 dxf)))
+        )
+        ((= typ "LWPOLYLINE")
+         (setq pts '())
+         (foreach p dxf
+           (if (= (car p) 10) (setq pts (append pts (list (cdr p)))))
+         )
+         (if (and pts (>= (length pts) 2))
+           (progn
+             (setq p0 (car pts))
+             (setq p1 (nth (1- (length pts)) pts))
+           )
+         )
+        )
+      )
+      (if (and p0 p1)
+        (list (/ (+ (car p0) (car p1)) 2.0) (/ (+ (cadr p0) (cadr p1)) 2.0))
+        nil
+      )
+    )
+    nil
+  )
+)
+
+(defun ocmema:safe-label (beamName centerEnt / mid p1 p2 p3 lead txt ok)
+  (setq ok "FAIL")
+  (setq mid (ocmema:pl-center-midpoint centerEnt))
+  (if mid
+    (progn
+      (setq p1 mid)
+      (setq p2 (list (+ (car p1) 0.4) (+ (cadr p1) 0.65)))
+      (setq p3 (list (+ (car p2) 0.18) (cadr p2)))
+      (setq lead (ocmema:safe-leader p1 p2 p3))
+      (if (not lead)
+        (progn
+          (ocmema:proj-warn "OCMEMA WARN: leader omitido (fallback polyline)")
+          (setq lead (ocmema:safe-entmakex
+            (list
+              (cons 0 "LWPOLYLINE")
+              (cons 100 "AcDbEntity")
+              (cons 8 ocmema:*pl-centerline-layer*)
+              (cons 62 7)
+              (cons 100 "AcDbPolyline")
+              (cons 90 3)
+              (cons 70 0)
+              (cons 10 (ocmema:pt2d p1))
+              (cons 10 (ocmema:pt2d p2))
+              (cons 10 (ocmema:pt2d p3))
+            )
+          ))
+          (if lead (ocmema:make-arrow-solid p1 p2))
+        )
+      )
+      (setq txt (ocmema:safe-entmakex
+        (list
+          (cons 0 "TEXT")
+          (cons 100 "AcDbEntity")
+          (cons 8 ocmema:*pl-centerline-layer*)
+          (cons 62 3)
+          (cons 100 "AcDbText")
+          (cons 10 p3)
+          (cons 11 p3)
+          (cons 40 0.18)
+          (cons 1 (if (= (type beamName) 'STR) beamName (vl-princ-to-string beamName)))
+          (cons 50 0.0)
+          (cons 72 1)
+          (cons 73 2)
+          (cons 7 (getvar "TEXTSTYLE"))
+        )
+      ))
+      (if (and lead txt) (setq ok "OK"))
+    )
+    (ocmema:proj-warn "OCMEMA WARN: etiqueta omitida (centerline insuficiente)")
+  )
+  ok
+)
+
+(defun ocmema:safe-hatch-activex (boundaryEnt / r obj ms hatch loops ok)
+  (setq ok nil)
+  (setq r (vl-catch-all-apply
+    '(lambda ()
+       (vl-load-com)
+       (setq obj (vlax-ename->vla-object boundaryEnt))
+       (setq ms (vla-get-ModelSpace (vla-get-ActiveDocument (vlax-get-acad-object))))
+       (setq hatch (vla-AddHatch ms 0 "AR-CONC" :vlax-true))
+       (vla-put-PatternScale hatch 0.003)
+       (vla-put-Color hatch 8)
+       (setq loops (vlax-make-safearray vlax-vbObject '(0 . 0)))
+       (vlax-safearray-put-element loops 0 obj)
+       (vla-AppendOuterLoop hatch loops)
+       (vla-Evaluate hatch)
+       (setq ok "OK")
+     )
+  ))
+  (if (vl-catch-all-error-p r)
+    (progn
+      (ocmema:proj-warn (strcat "OCMEMA WARN: hatch ActiveX omitido (" (vl-catch-all-error-message r) ")"))
+      nil
+    )
+    ok
+  )
+)
+
+(defun ocmema:safe-hatch (boundaryEnt / prev cur r sel ok)
+  (setq ok (ocmema:safe-hatch-activex boundaryEnt))
+  (if ok
+    ok
+    (progn
+      (setq prev (entlast))
+      (setq cur nil)
+      (setq sel (ssadd boundaryEnt))
+      (setq r (vl-catch-all-apply
+        '(lambda () (command "_.-HATCH" "_S" sel "" "_P" "AR-CONC" "_S" "0.003" "_C" "8" ""))
+      ))
+      (if (vl-catch-all-error-p r)
+        (progn
+          (ocmema:proj-warn (strcat "OCMEMA WARN: hatch omitido (" (vl-catch-all-error-message r) ")"))
+          nil
+        )
+        (progn
+          (setq cur (entlast))
+          (if (and cur (not (eq cur prev)) (= (cdr (assoc 0 (entget cur))) "HATCH"))
+            "OK"
+            (progn
+              (ocmema:proj-warn "OCMEMA WARN: hatch omitido (incompatible)")
+              nil
+            )
+          )
+        )
+      )
+    )
+  )
+)
+
+(defun ocmema:beam-post-format (beamName boundaryEnt centerEnt / labelOk hatchOk typ r)
+  (setq labelOk "FAIL")
+  (setq hatchOk "FAIL")
+  (ocmema:pl-ensure-layer "TRABE-PROY" 256)
+  (ocmema:pl-ensure-layer "TRABES" 256)
+  (if (and centerEnt (= (type centerEnt) 'ENAME))
+    (progn
+      (setq r (vl-catch-all-apply 'entget (list centerEnt)))
+      (if (vl-catch-all-error-p r)
+        (progn
+          (ocmema:proj-warn (strcat "OCMEMA WARN: entget centerline falló: " (vl-catch-all-error-message r)))
+          (setq typ nil)
+        )
+        (setq typ (cdr (assoc 0 r)))
+      )
+      (if (= typ "LWPOLYLINE")
+        (ocmema:safe-entmod centerEnt (list (cons 8 "TRABES") (cons 48 0.5) (cons 43 0.08) (cons 40 0.08) (cons 41 0.08)))
+        (ocmema:safe-entmod centerEnt (list (cons 8 "TRABES") (cons 48 0.5)))
+      )
+      (setq labelOk (ocmema:safe-label beamName centerEnt))
+    )
+    (ocmema:proj-warn "OCMEMA WARN: centerline nil; etiqueta omitida")
+  )
+  (if (and boundaryEnt (= (type boundaryEnt) 'ENAME))
+    (setq hatchOk (ocmema:safe-hatch boundaryEnt))
+    (ocmema:proj-warn "OCMEMA WARN: hatch omitido (contorno nil)")
+  )
+  (list labelOk hatchOk)
 )
 
 (defun ocmema:pl-units-factor (units / u)
@@ -2822,6 +3078,7 @@
 )
 
 (defun ocmema:pl-draw-beam (beam widths_cm anlPath ext_mode ext_ini ext_fin / name align kv points pnorm keys units scale wall_cm widths_draw w_used base center edge1 edge2 rect dir normal_left normal_right ext_cm ext_draw offset_draw p0 pN nPts mode align_note w_list
+                              rectEnt centerEnt fmt labelOk hatchOk r
                               i n wi pA0 pA1 pB0 pB1 prevA0 prevA1 prevB0 prevB1 ipA ipB side_plus side_minus)
   (setq name (ocm-get beam "name"))
   (setq align (ocm-get beam "align"))
@@ -2978,8 +3235,28 @@
             )
           )
 
-          (ocmema:draw-lwpoly center nil ocmema:*pl-centerline-layer* ocmema:*pl-beam-color*)
-          (ocmema:draw-lwpoly rect T ocmema:*pl-outline-layer* ocmema:*pl-beam-color*)
+          (setq centerEnt (ocmema:draw-lwpoly center nil ocmema:*pl-centerline-layer* ocmema:*pl-beam-color*))
+          (setq rectEnt (ocmema:draw-lwpoly rect T ocmema:*pl-outline-layer* ocmema:*pl-beam-color*))
+
+          (setq labelOk "FAIL")
+          (setq hatchOk "FAIL")
+          (setq fmt (ocmema:beam-post-format name rectEnt centerEnt))
+          (if (and fmt (listp fmt))
+            (progn
+              (setq labelOk (car fmt))
+              (setq hatchOk (cadr fmt))
+            )
+          )
+
+          (princ
+            (strcat
+              "\nOCMEMA DBG: beam=" (if name (vl-princ-to-string name) "<sin nombre>")
+              " contour=" (if rectEnt "T" "NIL")
+              " center=" (if centerEnt "T" "NIL")
+              " label=" labelOk
+              " hatch=" (if hatchOk hatchOk "FAIL")
+            )
+          )
         )
       )
       T
