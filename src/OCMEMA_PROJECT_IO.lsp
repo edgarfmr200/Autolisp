@@ -477,41 +477,36 @@
   )
 )
 
-(defun ocmema:make-arrow-solid (p1 p2 / dir perp base pA pB)
-  (setq dir (ocm-vec-unit (ocm-vec-sub p2 p1)))
-  (setq perp (list (- (cadr dir)) (car dir)))
-  (setq base (ocm-vec-add p1 (ocm-vec-scale dir 0.1)))
-  (setq pA (ocm-vec-add base (ocm-vec-scale perp 0.05)))
-  (setq pB (ocm-vec-sub base (ocm-vec-scale perp 0.05)))
-  (ocmema:safe-entmakex
-    (list
-      (cons 0 "SOLID")
-      (cons 100 "AcDbEntity")
-      (cons 8 ocmema:*pl-centerline-layer*)
-      (cons 62 7)
-      (cons 100 "AcDbTrace")
-      (cons 10 (ocmema:pt2d p1))
-      (cons 11 (ocmema:pt2d pA))
-      (cons 12 (ocmema:pt2d pB))
-      (cons 13 (ocmema:pt2d pB))
-    )
-  )
-)
-
-(defun ocmema:safe-leader (p1 p2 p3 / oldblk prev en r)
+(defun ocmema:safe-leader (p1 p2 p3 / oldblk before e ent r)
   (setq oldblk (getvar "DIMBLK"))
-  (setq prev (entlast))
+  (setq before (entlast))
   (setvar "DIMBLK" "_CLOSED")
-  (setq r (vl-catch-all-apply '(lambda () (command "_.LEADER" p1 p2 p3 "" "N"))))
+  (setq r (vl-catch-all-apply
+    '(lambda ()
+       (vl-cmdf "_.LEADER" p1 p2 p3 "")
+       (vl-cmdf "O")
+       (vl-cmdf "N")
+       (vl-cmdf "")
+     )
+  ))
+  (while (> (getvar "CMDACTIVE") 0) (vl-cmdf ""))
   (setvar "DIMBLK" oldblk)
   (if (vl-catch-all-error-p r)
-    nil
     (progn
-      (setq en (entlast))
-      (if (and en (not (eq en prev)) (= (cdr (assoc 0 (entget en))) "LEADER"))
+      (ocmema:proj-warn (strcat "OCMEMA WARN: leader omitido (" (vl-catch-all-error-message r) ")"))
+      nil
+    )
+    (progn
+      (setq ent nil)
+      (setq e (if before (entnext before) (entnext)))
+      (while e
+        (if (= (cdr (assoc 0 (entget e))) "LEADER") (setq ent e))
+        (setq e (entnext e))
+      )
+      (if ent
         (progn
-          (ocmema:safe-entmod en (list (cons 8 "TRABES") (cons 62 7)))
-          en
+          (ocmema:safe-entmod ent (list (cons 8 "TRABES") (cons 62 7)))
+          ent
         )
         nil
       )
@@ -551,35 +546,17 @@
   )
 )
 
-(defun ocmema:safe-label (beamName centerEnt / mid p1 p2 p3 lead txt ok)
+(defun ocmema:safe-label (beamName centerEnt / before mid p1 p2 p3 ptText lead txt ok ent typ e)
   (setq ok "FAIL")
   (setq mid (ocmema:pl-center-midpoint centerEnt))
   (if mid
     (progn
+      (setq before (entlast))
       (setq p1 mid)
       (setq p2 (list (+ (car p1) 0.4) (+ (cadr p1) 0.65)))
       (setq p3 (list (+ (car p2) 0.18) (cadr p2)))
       (setq lead (ocmema:safe-leader p1 p2 p3))
-      (if (not lead)
-        (progn
-          (ocmema:proj-warn "OCMEMA WARN: leader omitido (fallback polyline)")
-          (setq lead (ocmema:safe-entmakex
-            (list
-              (cons 0 "LWPOLYLINE")
-              (cons 100 "AcDbEntity")
-              (cons 8 ocmema:*pl-centerline-layer*)
-              (cons 62 7)
-              (cons 100 "AcDbPolyline")
-              (cons 90 3)
-              (cons 70 0)
-              (cons 10 (ocmema:pt2d p1))
-              (cons 10 (ocmema:pt2d p2))
-              (cons 10 (ocmema:pt2d p3))
-            )
-          ))
-          (if lead (ocmema:make-arrow-solid p1 p2))
-        )
-      )
+      (setq ptText (polar p3 0.0 0.05))
       (setq txt (ocmema:safe-entmakex
         (list
           (cons 0 "TEXT")
@@ -587,17 +564,27 @@
           (cons 8 ocmema:*pl-centerline-layer*)
           (cons 62 3)
           (cons 100 "AcDbText")
-          (cons 10 p3)
-          (cons 11 p3)
+          (cons 10 ptText)
+          (cons 11 ptText)
           (cons 40 0.18)
           (cons 1 (if (= (type beamName) 'STR) beamName (vl-princ-to-string beamName)))
           (cons 50 0.0)
-          (cons 72 1)
+          (cons 72 0)
           (cons 73 2)
           (cons 7 (getvar "TEXTSTYLE"))
         )
       ))
-      (if (and lead txt) (setq ok "OK"))
+      (if txt (setq ok "OK"))
+
+      (setq e (if before (entnext before) (entnext)))
+      (while e
+        (setq typ (cdr (assoc 0 (entget e))))
+        (if (and (member typ (list "SOLID" "LWPOLYLINE" "POLYLINE" "MTEXT"))
+                 (not (eq e lead)))
+          (entdel e)
+        )
+        (setq e (entnext e))
+      )
     )
     (ocmema:proj-warn "OCMEMA WARN: etiqueta omitida (centerline insuficiente)")
   )
