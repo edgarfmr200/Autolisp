@@ -522,6 +522,7 @@
 
   (setq asMinFormula (* (/ (* 0.8 (sqrt fc_val)) 4200.0) b_cm (- h_cm 3.0)))
   (princ (strcat "\n\n*** F'c: " (rtos fc_val 2 0) " | As Min (ACI): " (rtos asMinFormula 2 3) " ***"))
+  (princ "\nOCMEMA WARN: TEMP steel logic/drawing not found in DIBUJAR_TRABE_V_FINAL_FIXED10; skipped")
 
   (setq tolX 0.005)
 
@@ -641,7 +642,10 @@
             (princ (strcat "\nOCMEMA DBG: assert extraR=" (rtos (abs (- x_draw_R x_real_R)) 2 3)))
           )
           (setq x_baston_ini x_draw_L) (setq x_baston_fin x_draw_R)
-                (if (< x_baston_ini x_ini_inf) (setq x_baston_ini x_ini_inf)) (if (> x_baston_fin x_fin_inf) (setq x_baston_fin x_fin_inf))
+          (setq clampL (- x_support0 visExtraL))
+          (setq clampR (+ x_supportL visExtraR))
+          (if (< x_baston_ini clampL) (setq x_baston_ini clampL))
+          (if (> x_baston_fin clampR) (setq x_baston_fin clampR))
                 (command "_.PLINE" (list x_baston_ini (+ yBot 0.45)) (list x_baston_ini (+ yBot 0.15)) (list x_baston_fin (+ yBot 0.15)) (list x_baston_fin (+ yBot 0.45)) "") (command "_.CHPROP" (entlast) "" "Color" 5 "") (command "_.FILLET" "P" (entlast))
                 (if (> distL 0.0)
                   (progn
@@ -782,7 +786,10 @@
             (princ (strcat "\nOCMEMA DBG: assert extraR=" (rtos (abs (- x_draw_R x_real_R)) 2 3)))
           )
           (setq x_baston_ini x_draw_L) (setq x_baston_fin x_draw_R)
-                (if (< x_baston_ini x_ini_inf) (setq x_baston_ini x_ini_inf)) (if (> x_baston_fin x_fin_inf) (setq x_baston_fin x_fin_inf))
+          (setq clampL (- x_support0 visExtraL))
+          (setq clampR (+ x_supportL visExtraR))
+          (if (< x_baston_ini clampL) (setq x_baston_ini clampL))
+          (if (> x_baston_fin clampR) (setq x_baston_fin clampR))
                 (command "_.PLINE" (list x_baston_ini (- yTop 0.45)) (list x_baston_ini (- yTop 0.15)) (list x_baston_fin (- yTop 0.15)) (list x_baston_fin (- yTop 0.45)) "") (command "_.CHPROP" (entlast) "" "Color" 5 "") (command "_.FILLET" "P" (entlast))
                 (if (> distL 0.0)
                   (progn
