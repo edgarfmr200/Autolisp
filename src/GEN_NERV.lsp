@@ -341,6 +341,8 @@
                 (cons "dir" dir)
                 (cons "spacing" sep_nerv)
                 (cons "n_clear" numClaros)
+                (cons "n_points" (length points))
+                (cons "points_raw" points)
               )
             )
             (ocmema:proj-autosave)
