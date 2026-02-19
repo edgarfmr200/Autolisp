@@ -8,7 +8,7 @@
                         nervName numClaros hasCantilever cantPos spanLengths coordList i spanLen 
                         totalLen memberCount supportStr numLoads loadType loadVal d1 d2 
                         isUniform b h dimList idx dimPair memID currentX nodeIdx totalNodes
-                        projName units scale points rawLen)
+                        projName units scale points rawLen genMode typedLen)
 
   (vl-load-com)
 
@@ -108,26 +108,66 @@
         
         ;; 2. GEOMETRÍA (LONGITUDES)
         (write-line "* --- GEOMETRIA Y NODOS ---" file)
-        (setq points (ocmema:proj-capture-points))
-        (if (not points)
-          (progn (princ "\nOCMEMA: Captura cancelada.") (exit))
-        )
-        (setq numClaros (1- (length points)))
-        (setq units (ocmema:proj-get-units))
-        (setq scale (ocmema:proj-get-scale))
-        (if (or (not units) (not scale))
-          (progn
-            (setq rawLen (distance (car points) (cadr points)))
-            (princ (strcat "\nOCMEMA: Claro 1 (sin convertir) = " (rtos rawLen 2 6)))
-            (initget "CM M MM")
-            (setq units (getkword "\nUnidades [CM/M/MM]: "))
-            (if (not units) (exit))
-            (setq scale (getreal "\nOCMEMA: Factor de escala (multiplicador) <1.0>: "))
-            (if (not scale) (setq scale 1.0))
-            (ocmema:proj-set-units-scale units scale)
+        (initget "D A")
+        (setq genMode (getkword "\nGenerar para [D Dibujo / A Analisis] <D>: "))
+        (if (not genMode) (setq genMode "D"))
+        (cond
+          ((= genMode "A")
+           (setq points nil)
+           (setq numClaros (ocmema:pio-getint-min "\nNumero de claros: " 1))
+           (setq units (ocmema:proj-get-units))
+           (setq scale (ocmema:proj-get-scale))
+           (if (or (not units) (not scale))
+             (progn
+               (initget "CM M MM")
+               (setq units (getkword "\nUnidades [CM/M/MM]: "))
+               (if (not units) (exit))
+               (setq scale (getreal "\nOCMEMA: Factor de escala (multiplicador) <1.0>: "))
+               (if (not scale) (setq scale 1.0))
+               (ocmema:proj-set-units-scale units scale)
+             )
+           )
+           (setq spanLengths (list))
+           (setq i 1)
+           (repeat numClaros
+             (setq typedLen (getreal (strcat "\nLongitud claro " (itoa i) ": ")))
+             (if (or (not typedLen) (<= typedLen 0.0)) (exit))
+             (setq spanLen (* typedLen (ocmema:proj-unit-factor units) scale))
+             (setq spanLengths (append spanLengths (list spanLen)))
+             (setq i (1+ i))
+           )
+          )
+          (T
+           (setq points (ocmema:proj-capture-points))
+           (if (not points)
+             (progn (princ "\nOCMEMA: Captura cancelada.") (exit))
+           )
+           (setq numClaros (1- (length points)))
+           (setq units (ocmema:proj-get-units))
+           (setq scale (ocmema:proj-get-scale))
+           (if (or (not units) (not scale))
+             (progn
+               (setq rawLen (distance (car points) (cadr points)))
+               (princ (strcat "\nOCMEMA: Claro 1 (sin convertir) = " (rtos rawLen 2 6)))
+               (initget "CM M MM")
+               (setq units (getkword "\nUnidades [CM/M/MM]: "))
+               (if (not units) (exit))
+               (setq scale (getreal "\nOCMEMA: Factor de escala (multiplicador) <1.0>: "))
+               (if (not scale) (setq scale 1.0))
+               (ocmema:proj-set-units-scale units scale)
+             )
+           )
+           (setq spanLengths (list))
+           (setq i 0)
+           (while (< i numClaros)
+             (setq spanLen (* (distance (nth i points) (nth (1+ i) points))
+                              (ocmema:proj-unit-factor units)
+                              scale))
+             (setq spanLengths (append spanLengths (list spanLen)))
+             (setq i (1+ i))
+           )
           )
         )
-        
         ;; Lógica de Voladizos
         (setq cantPos "Ninguno")
         (if (> numClaros 1)
@@ -144,16 +184,6 @@
             )
           )
           (setq hasCantilever "No")
-        )
-
-        (setq spanLengths '())
-        (setq i 0)
-        (while (< i numClaros)
-          (setq spanLen (* (distance (nth i points) (nth (1+ i) points))
-                           (ocmema:proj-unit-factor units)
-                           scale))
-          (setq spanLengths (append spanLengths (list spanLen)))
-          (setq i (1+ i))
         )
 
         ;; --- DEFINICIÓN DE SECCIONES ---
@@ -244,7 +274,7 @@
         (write-line "CONSTANTS" file)
         (write-line (strcat "MATERIAL " matName " ALL") file)
         (write-line "MEMBER CRACKED" file)
-        (write-line (strcat "1 TO " (itoa memberCount) " REDUCTION RIX 0.5 RIY 0.5 RIZ 0.5") file)
+        (write-line (strcat "1 TO " (itoa memberCount) " REDUCTION RIY 0.5") file)
 
         ;; 6. SOPORTES
         (write-line "* --- CONDICIONES DE APOYO ---" file)
@@ -353,6 +383,8 @@
         (write-line "1 1.2 2 1.6" file)
         (write-line "LOAD COMB 4 CM + CV" file)
         (write-line "1 1.0 2 1.0" file)
+        (write-line "LOAD COMB 6 CM + 0.5 CV" file)
+        (write-line "1 1.0 2 0.5" file)
         (write-line "LOAD COMB 5 1.4 CM" file)
         (write-line "1 1.4" file)
 
@@ -392,8 +424,10 @@
             (ocmema:proj-upsert-beam
               (list
                 (cons "name" nervName)
-                (cons "n_points" (length points))
-                (cons "points_raw" points)
+                (cons "n_points" (if points (length points) 0))
+                (cons "points_raw" (if points points '()))
+                (cons "drawable_plan" (if points T nil))
+                (cons "span_lengths" spanLengths)
               )
             )
             (ocmema:proj-autosave)
