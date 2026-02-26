@@ -89,7 +89,28 @@
     
     (if ocmema:*rib-force-name*
       (setq nervName ocmema:*rib-force-name*)
-      (setq nervName (getstring "\nNombre de la nervadura (ej. N-1): "))
+      (progn
+        (setq nervName nil)
+        (setq cancelName nil)
+        (while (and (not cancelName) (not nervName))
+          (setq nervName (getstring "\nNombre de la nervadura (ej. N-1): "))
+          (cond
+            ((null nervName)
+             (princ "\nCancelado por usuario.")
+             (setq cancelName T)
+            )
+            ((= nervName "")
+             (princ "\nOCMEMA: El nombre no puede estar vacio.")
+             (setq nervName nil)
+            )
+            ((ocmema:proj-rib-name-exists nervName)
+             (princ (strcat "\nOCMEMA: La nervadura '" nervName "' ya existe. Ingresa un nombre nuevo o usa el menú Modificar."))
+             (setq nervName nil)
+            )
+          )
+        )
+        (if cancelName (exit))
+      )
     )
 
     ;; Seleccion de planta y parametros de losa

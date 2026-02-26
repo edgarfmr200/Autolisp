@@ -1415,22 +1415,26 @@
   )
 )
 
-(defun ocmema:proj-update-beam-points (name points / proj beams out item)
+(defun ocmema:proj-update-beam-points (name points / proj beams out item found)
   (setq proj ocmema:*project*)
   (setq beams (ocmema:proj-get-beams))
   (setq out '())
+  (setq found nil)
   (foreach item beams
     (if (= (ocmema:pio-normalize-name (ocmema:pio-assoc-get "name" item))
            (ocmema:pio-normalize-name name))
       (progn
         (setq item (ocmema:pio-alist-set "points_raw" points item))
         (setq item (ocmema:pio-alist-set "n_points" (length points) item))
+        (setq item (ocmema:pio-alist-set "drawable_plan" T item))
+        (setq found T)
       )
     )
     (setq out (append out (list item)))
   )
   (setq proj (ocmema:pio-alist-set "beams" out proj))
   (setq ocmema:*project* proj)
+  found
 )
 
 (defun ocmema:proj-get-units (/ proj unit)
@@ -3742,7 +3746,7 @@
   (princ)
 )
 
-(defun ocmema:menu-modificar-trabe (/ name beam opt points)
+(defun ocmema:menu-modificar-trabe (/ name beam opt points ok)
   (setq name (getstring T "\nNombre exacto de la trabe: "))
   (if (not name)
     (ocmema:proj-cancelled)
@@ -3752,16 +3756,22 @@
         (ocmema:proj-log "Trabe no existe.")
         (progn
           (initget "P R X")
-          (setq opt (getkword "\nModificar [P PuntosSoloTXT/R RehacerTrabeSTD/X Regresar] <X>: "))
+          (setq opt (getkword "\nModificar [P Puntos(solo TXT)/R Rehacer trabe(.STD)/X Regresar] <X>: "))
           (cond
             ((or (not opt) (= opt "X")) nil)
             ((= opt "P")
              (setq points (ocmema:proj-capture-points))
              (if (not points)
-               (ocmema:proj-cancelled)
+               (princ "\nOCMEMA: Cancelado. No se hicieron cambios.")
                (progn
-                 (ocmema:proj-update-beam-points (ocmema:pio-assoc-get "name" beam) points)
-                 (ocmema:proj-autosave-from "project menu: modify beam points")
+                 (setq ok (ocmema:proj-update-beam-points (ocmema:pio-assoc-get "name" beam) points))
+                 (if ok
+                   (progn
+                     (ocmema:proj-autosave-from "project menu: modify beam points")
+                     (princ (strcat "\nOCMEMA: Puntos actualizados para trabe " (ocmema:pio-assoc-get "name" beam) ". No se rehizo el .STD."))
+                   )
+                   (princ "\nOCMEMA: Cancelado. No se hicieron cambios.")
+                 )
                )
              )
             )
