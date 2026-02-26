@@ -3912,6 +3912,37 @@
   )
 )
 
+(defun ocmema:pl-default-beam-dir (/ dir path base)
+  (setq dir (if ocmema:*project* (ocmema:pio-assoc-get "dir_beams_std" ocmema:*project*) nil))
+  (if (and dir (/= dir ""))
+    (ocmema:proj-ensure-dir-sep dir)
+    (progn
+      (setq path ocmema:*project-path*)
+      (setq base (if (and path (/= path "")) (vl-filename-directory path) nil))
+      (if (and base (/= base ""))
+        (ocmema:proj-ensure-dir-sep base)
+        (progn
+          (setq base (getvar "DWGPREFIX"))
+          (if (and base (/= base ""))
+            (ocmema:proj-ensure-dir-sep base)
+            ocmema:*proj-default-dir*
+          )
+        )
+      )
+    )
+  )
+)
+
+(defun ocmema:pl-beam-has-points-p (beam / kv points n)
+  (setq kv (ocm-assoc-get "points_raw" beam))
+  (setq points (if kv (cdr kv) nil))
+  (setq n (ocm-get beam "n_points"))
+  (if (and n (numberp n) (>= n 2))
+    T
+    (if (and points (listp points) (>= (length points) 2)) T nil)
+  )
+)
+
 (defun ocmema:pl-anl-exists-p (name files / target f found)
   (setq found nil)
   (if (and name files (listp files))
@@ -4115,7 +4146,7 @@
 )
 
 (defun ocmema:menu-dibujar-planta-trabes-una (/ path name beams beam widths mode ext ext_ini ext_fin wall_cm scale)
-  (setq path (getfiled "Selecciona ANL de trabe" ocmema:*proj-default-dir* "ANL" 0))
+  (setq path (getfiled "Selecciona ANL de trabe" (ocmema:pl-default-beam-dir) "ANL;STD;TXT" 0))
   (if (not path)
     (ocmema:proj-cancelled)
     (progn
@@ -4128,17 +4159,27 @@
           (if (not beam)
             (ocmema:proj-log (strcat "Trabe " name " no encontrada en proyecto."))
             (progn
-              (initget "A M")
-              (setq mode (getkword "\nExtension extremos [A Auto/M Manual] <A>: "))
-              (if (not mode) (setq mode "A"))
-              (setq wall_cm (ocmema:pio-assoc-get "wall_cm" ocmema:*project*))
-              (setq scale (ocmema:get-scale ocmema:*project*))
-              (setq ext (ocmema:pl-get-extents mode wall_cm (ocmema:pio-assoc-get "units" ocmema:*project*) scale))
-              (setq ext_ini (car ext))
-              (setq ext_fin (cadr ext))
-              (setq widths (ocmema:anl-extract-widths-cm path))
-              (if (ocmema:pl-draw-beam beam widths path mode ext_ini ext_fin)
-                (ocmema:proj-log (strcat "Trabe " name " dibujada."))
+              (if (not (ocmema:pl-beam-has-points-p beam))
+                (ocmema:proj-log
+                  (strcat
+                    "OCMEMA: La trabe '" (ocmema:pl-name->str (ocm-get beam "name"))
+                    "' no tiene puntos guardados en TXT (fue generada solo para análisis). Usa Modificar Puntos solo TXT para agregar puntos."
+                  )
+                )
+                (progn
+                  (initget "A M")
+                  (setq mode (getkword "\nExtension extremos [A Auto/M Manual] <A>: "))
+                  (if (not mode) (setq mode "A"))
+                  (setq wall_cm (ocmema:pio-assoc-get "wall_cm" ocmema:*project*))
+                  (setq scale (ocmema:get-scale ocmema:*project*))
+                  (setq ext (ocmema:pl-get-extents mode wall_cm (ocmema:pio-assoc-get "units" ocmema:*project*) scale))
+                  (setq ext_ini (car ext))
+                  (setq ext_fin (cadr ext))
+                  (setq widths (ocmema:anl-extract-widths-cm path))
+                  (if (ocmema:pl-draw-beam beam widths path mode ext_ini ext_fin)
+                    (ocmema:proj-log (strcat "Trabe " (ocmema:pl-name->str (ocm-get beam "name")) " dibujada."))
+                  )
+                )
               )
             )
           )
@@ -4173,7 +4214,8 @@
   path
 )
 
-(defun ocmema:menu-dibujar-planta-trabes-todas (/ beams total drawn folder files filemap beam name key path widths mode ext ext_ini ext_fin wall_cm scale units missing matched extra)
+(defun ocmema:menu-dibujar-planta-trabes-todas (/ beams total drawn folder files filemap beam name key path widths mode ext ext_ini ext_fin wall_cm scale units
+                                                 missing matched extra drawn_names skipped_no_points skipped_not_found batch_auto_ext resp)
   (setq beams (ocmema:proj-get-beams))
   (if (not (and beams (listp beams)))
     (ocmema:proj-log "No hay trabes en el proyecto.")
@@ -4182,7 +4224,10 @@
       (setq drawn 0)
       (setq missing 0)
       (setq matched 0)
-      (setq folder (ocmema:safe-pick-folder "Selecciona carpeta con archivos .ANL" ocmema:*proj-default-dir*))
+      (setq drawn_names '())
+      (setq skipped_no_points '())
+      (setq skipped_not_found '())
+      (setq folder (ocmema:safe-pick-folder "Selecciona carpeta con archivos .ANL" (ocmema:pl-default-beam-dir)))
       (if (not folder)
         (ocmema:proj-warn "OCMEMA WARN: Todas cancelado (sin carpeta).")
         (progn
@@ -4195,40 +4240,68 @@
           (setq wall_cm (ocmema:pio-assoc-get "wall_cm" ocmema:*project*))
           (setq scale (ocmema:get-scale ocmema:*project*))
           (setq units (ocmema:pio-assoc-get "units" ocmema:*project*))
+          (initget "S N")
+          (setq resp (getkword "\n¿Usar extensión automática para TODAS las trabes? [S/N] <S>: "))
+          (if (or (not resp) (= resp "S"))
+            (setq batch_auto_ext T)
+            (setq batch_auto_ext nil)
+          )
           (foreach beam beams
             (setq name (ocm-get beam "name"))
             (setq key (strcase (ocmema:pl-name->str name)))
             (setq path (cdr (assoc key filemap)))
             (if path
               (progn
-                (initget "A M")
-                (setq mode (getkword (strcat "\nExtension extremos para <" (vl-princ-to-string name) "> [A Auto/M Manual] <A>: ")))
-                (if (not mode) (setq mode "A"))
-                (setq ext (ocmema:pl-get-extents mode wall_cm units scale))
-                (setq ext_ini (car ext))
-                (setq ext_fin (cadr ext))
-                (setq widths (ocmema:anl-extract-widths-cm path))
-                (if (ocmema:pl-draw-beam beam widths path mode ext_ini ext_fin)
-                  (setq drawn (1+ drawn))
-                )
                 (setq matched (1+ matched))
+                (if (not (ocmema:pl-beam-has-points-p beam))
+                  (setq skipped_no_points (append skipped_no_points (list (ocmema:pl-name->str name))))
+                  (progn
+                    (if batch_auto_ext
+                      (progn
+                        (setq mode "A")
+                        (setq ext (ocmema:pl-get-extents mode wall_cm units scale))
+                        (setq ext_ini (car ext))
+                        (setq ext_fin (cadr ext))
+                      )
+                      (progn
+                        (initget "A M")
+                        (setq mode (getkword (strcat "\nExtension extremos para <" (vl-princ-to-string name) "> [A Auto/M Manual] <A>: ")))
+                        (if (not mode) (setq mode "A"))
+                        (setq ext (ocmema:pl-get-extents mode wall_cm units scale))
+                        (setq ext_ini (car ext))
+                        (setq ext_fin (cadr ext))
+                      )
+                    )
+                    (setq widths (ocmema:anl-extract-widths-cm path))
+                    (if (ocmema:pl-draw-beam beam widths path mode ext_ini ext_fin)
+                      (progn
+                        (setq drawn (1+ drawn))
+                        (setq drawn_names (append drawn_names (list (ocmema:pl-name->str name))))
+                      )
+                    )
+                  )
+                )
               )
               (setq missing (1+ missing))
             )
           )
           (setq extra (if files (- (length files) matched) 0))
-          (cond
-            ((and (= extra 0) (= missing 0))
-             (ocmema:proj-log (strcat "OCMEMA: Todas -> Dibujadas=" (itoa drawn) " (OK)"))
+          (foreach f files
+            (setq key (strcase (vl-filename-base f)))
+            (if (not (ocmema:pl-find-beam-by-name-pure key beams))
+              (setq skipped_not_found (append skipped_not_found (list key)))
             )
-            ((and (> extra 0) (= missing 0))
-             (ocmema:proj-log (strcat "OCMEMA: Todas -> Dibujadas=" (itoa drawn) ", Omitidas(extra ANL)=" (itoa extra)))
+          )
+          (ocmema:proj-log (strcat "OCMEMA: Dibujadas " (itoa drawn) " trabes."))
+          (if skipped_no_points
+            (ocmema:proj-log
+              (strcat "OCMEMA: Omitidas " (itoa (length skipped_no_points)) " (sin puntos en TXT): "
+                      (ocmema:pio-join skipped_no_points ", "))
             )
-            ((and (= extra 0) (> missing 0))
-             (ocmema:proj-log (strcat "OCMEMA: Todas -> Dibujadas=" (itoa drawn) ", Faltantes(sin ANL)=" (itoa missing)))
-            )
-            (T
-             (ocmema:proj-log (strcat "OCMEMA: Todas -> Dibujadas=" (itoa drawn) ", Omitidas(extra ANL)=" (itoa extra) ", Faltantes(sin ANL)=" (itoa missing)))
+          )
+          (if skipped_not_found
+            (ocmema:proj-log
+              (strcat "OCMEMA: No existe en TXT / proyecto: " (ocmema:pio-join skipped_not_found ", ") ". (Genera o guarda primero)")
             )
           )
         )
