@@ -1,4 +1,4 @@
-;; ==============================================================================
+﻿;; ==============================================================================
 ;; GEN_TRABES_V3.LSP
 ;; FIX: Signo de Cargas Invertido (Input * -1).
 ;;      Peso Propio agregado en Carga Muerta.
@@ -8,7 +8,7 @@
                         nervName numClaros hasCantilever cantPos spanLengths coordList i spanLen 
                         totalLen memberCount supportStr numLoads loadType loadVal d1 d2 
                         isUniform b h dimList idx dimPair memID currentX nodeIdx totalNodes
-                        projName units scale points rawLen genMode typedLen)
+                        projName units scale points rawLen genMode typedLen change dirPref spanStr meta)
 
   (vl-load-com)
 
@@ -22,6 +22,10 @@
 
   ;; --- CONFIGURACIÓN DE RUTA POR DEFECTO ---
   (setq defaultPath "C:\\Users\\edgar\\OneDrive - ITESO\\OCMEMA_IE\\01. PROYECTOS\\")
+  (setq dirPref (if ocmema:*project* (ocmema:pio-assoc-get "dir_beams_std" ocmema:*project*) nil))
+  (if (and dirPref (/= dirPref ""))
+    (setq defaultPath (ocmema:proj-ensure-dir-sep dirPref))
+  )
 
   (princ "\n--- DATOS GENERALES DEL PROYECTO (TRABES) ---")
   
@@ -43,11 +47,41 @@
   (setq dateStr (menucmd "M=$(edtime,$(getvar,date),DD-MON-YY)"))
   (princ (strcat "\nFecha detectada: " dateStr))
 
-  ;; Materiales
-  (setq fc (getreal "\nIntroduce el F'c del concreto (kg/cm2): "))
+  ;; Materiales (concreto)
+  (setq fc (if ocmema:*project* (ocmema:pio-assoc-get "fc_kgcm2" ocmema:*project*) nil))
+  (setq E_mod (if ocmema:*project* (ocmema:pio-assoc-get "ec_kgcm2" ocmema:*project*) nil))
+  (if (and fc E_mod)
+    (progn
+      (initget "S N")
+      (setq change (getkword "\n¿Deseas cambiar el concreto? [S/N] <N>: "))
+      (if (or (not change) (= change "N"))
+        nil
+        (progn
+          (setq fc (getreal "\nIntroduce el F'c del concreto (kg/cm2): "))
+          (setq E_mod (getreal "\nIntroduce el Modulo de Elasticidad E (kg/cm2): "))
+          (initget "S N")
+          (setq change (getkword "\n¿Actualizar estos datos en el proyecto? [S/N] <N>: "))
+          (if (and ocmema:*project* change (= change "S"))
+            (progn
+              (setq ocmema:*project* (ocmema:pio-alist-set "fc_kgcm2" fc ocmema:*project*))
+              (setq ocmema:*project* (ocmema:pio-alist-set "ec_kgcm2" E_mod ocmema:*project*))
+            )
+          )
+        )
+      )
+    )
+    (progn
+      (setq fc (getreal "\nIntroduce el F'c del concreto (kg/cm2): "))
+      (setq E_mod (getreal "\nIntroduce el Modulo de Elasticidad E (kg/cm2): "))
+      (if ocmema:*project*
+        (progn
+          (setq ocmema:*project* (ocmema:pio-alist-set "fc_kgcm2" fc ocmema:*project*))
+          (setq ocmema:*project* (ocmema:pio-alist-set "ec_kgcm2" E_mod ocmema:*project*))
+        )
+      )
+    )
+  )
   (setq matName (strcat "fc_" (rtos fc 2 0)))
-  
-  (setq E_mod (getreal "\nIntroduce el Modulo de Elasticidad E (kg/cm2): "))
 
   ;; Variable para almacenar la ruta elegida la primera vez
   (setq dirPath nil)
@@ -84,7 +118,12 @@
       (progn
         (setq fullPath (getfiled (strcat "Guardar " nervName) (strcat defaultPath nervName ".std") "std" 1))
         (if fullPath
-          (setq dirPath (vl-filename-directory fullPath))
+          (progn
+            (setq dirPath (vl-filename-directory fullPath))
+            (if ocmema:*project*
+              (setq ocmema:*project* (ocmema:pio-alist-set "dir_beams_std" dirPath ocmema:*project*))
+            )
+          )
           (progn (princ "\nCancelado por usuario.") (exit))
         )
       )
@@ -113,26 +152,15 @@
         (if (not genMode) (setq genMode "D"))
         (cond
           ((= genMode "A")
+           ;; Analisis: longitudes siempre en cm, sin unidades/escala de dibujo
            (setq points nil)
            (setq numClaros (ocmema:pio-getint-min "\nNumero de claros: " 1))
-           (setq units (ocmema:proj-get-units))
-           (setq scale (ocmema:proj-get-scale))
-           (if (or (not units) (not scale))
-             (progn
-               (initget "CM M MM")
-               (setq units (getkword "\nUnidades [CM/M/MM]: "))
-               (if (not units) (exit))
-               (setq scale (getreal "\nOCMEMA: Factor de escala (multiplicador) <1.0>: "))
-               (if (not scale) (setq scale 1.0))
-               (ocmema:proj-set-units-scale units scale)
-             )
-           )
            (setq spanLengths (list))
            (setq i 1)
            (repeat numClaros
-             (setq typedLen (getreal (strcat "\nLongitud claro " (itoa i) ": ")))
+             (setq typedLen (getreal (strcat "\nLongitud claro " (itoa i) " (cm): ")))
              (if (or (not typedLen) (<= typedLen 0.0)) (exit))
-             (setq spanLen (* typedLen (ocmema:proj-unit-factor units) scale))
+             (setq spanLen typedLen)
              (setq spanLengths (append spanLengths (list spanLen)))
              (setq i (1+ i))
            )
@@ -143,8 +171,8 @@
              (progn (princ "\nOCMEMA: Captura cancelada.") (exit))
            )
            (setq numClaros (1- (length points)))
-           (setq units (ocmema:proj-get-units))
-           (setq scale (ocmema:proj-get-scale))
+           (setq units (if ocmema:*project* (ocmema:pio-assoc-get "draw_units" ocmema:*project*) nil))
+           (setq scale (if ocmema:*project* (ocmema:pio-assoc-get "draw_scale_factor" ocmema:*project*) nil))
            (if (or (not units) (not scale))
              (progn
                (setq rawLen (distance (car points) (cadr points)))
@@ -154,7 +182,13 @@
                (if (not units) (exit))
                (setq scale (getreal "\nOCMEMA: Factor de escala (multiplicador) <1.0>: "))
                (if (not scale) (setq scale 1.0))
-               (ocmema:proj-set-units-scale units scale)
+               (if ocmema:*project*
+                 (progn
+                   (setq ocmema:*project* (ocmema:pio-alist-set "draw_units" units ocmema:*project*))
+                   (setq ocmema:*project* (ocmema:pio-alist-set "draw_scale_factor" scale ocmema:*project*))
+                   (ocmema:proj-set-units-scale units scale)
+                 )
+               )
              )
            )
            (setq spanLengths (list))
@@ -421,6 +455,11 @@
         (close file)
         (if ocmema:*project*
           (progn
+            (setq spanStr "")
+            (foreach len spanLengths
+              (setq spanStr (if (= spanStr "") (rtos len 2 6) (strcat spanStr "," (rtos len 2 6))))
+            )
+            (setq meta (strcat "drawable_plan=" (if points "1" "0") ";span_lengths=" spanStr))
             (ocmema:proj-upsert-beam
               (list
                 (cons "name" nervName)
@@ -428,9 +467,13 @@
                 (cons "points_raw" (if points points '()))
                 (cons "drawable_plan" (if points T nil))
                 (cons "span_lengths" spanLengths)
+                (cons "meta_kv" meta)
               )
             )
-            (ocmema:proj-autosave)
+            (if ocmema:*debug-io*
+              (ocmema:dbg-io "[CALL] autosave from GEN_TRABES after upsert beam")
+            )
+            (ocmema:proj-autosave-from "GEN_TRABES after upsert beam")
           )
         )
         (princ (strcat "\nArchivo generado: " nervName))
