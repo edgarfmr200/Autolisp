@@ -16,7 +16,7 @@
 ;;  - Se preservan offsets fijos, colores y estilo general. No se implementa auto-evitar solapes.
 ;; ==============================================================================
 
-(defun c:DIBUJAR_TRABE_V_FINAL (/ *error* file dir filename tempFile wsh cmd fp line
+(defun ocmema:beam:var-armar-from-anl (anlPath / *error* file dir filename tempFile wsh cmd fp line
 
                                 ;; Geometría / lectura
                                 dataMode tokenList strList cleanLine
@@ -394,9 +394,12 @@
   ;; ----------------------------------------------------------------------------
   ;; 2) Lectura de ANL (token-by-token, mantiene estilo V13)
   ;; ----------------------------------------------------------------------------
-  (setq file (getfiled "Seleccionar archivo TRABE (ANL)"
-                        (if (vl-file-directory-p ocmema--default-project-dir) ocmema--default-project-dir "")
-                        "ANL;TXT;OUT" 4))
+  (setq file anlPath)
+  (if (or (not file) (= file ""))
+    (setq file (getfiled "Seleccionar archivo TRABE (ANL)"
+                          (if (vl-file-directory-p ocmema--default-project-dir) ocmema--default-project-dir "")
+                          "ANL;TXT;OUT" 4))
+  )
   (if (not file) (exit))
 
   (setq filename (vl-filename-base file))
@@ -3224,3 +3227,5 @@
   (princ "\nDibujo de Trabe (V_FINAL) completado.")
   (princ)
 )
+
+(defun c:DIBUJAR_TRABE_V_FINAL () (ocmema:beam:var-armar-from-anl nil))

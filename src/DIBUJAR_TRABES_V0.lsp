@@ -7,7 +7,7 @@
 ;;  - Esto garantiza que el gancho nazca fuera del volumen visual de la dona.
 ;; ==============================================================================
 
-(defun c:DIBUJAR_TRABE_SIMPLE (/ *error* file dir filename tempFile wsh cmd fp line 
+(defun ocmema:beam:const-armar-from-anl (anlPath / *error* file dir filename tempFile wsh cmd fp line 
                             coordList YD ZB startX endX l_total_cm l_total_m h_cm b_cm 
                             h_draw rectLen ptOrigin xOrigin yOrigin oldOsnap p1 p2 
                             idx numNodes hasAxis axisName posType drawX extraX 
@@ -430,9 +430,12 @@
   ;; ==============================================================================
   ;; 2. LECTURA DE DATOS
   ;; ==============================================================================
-  (setq file (getfiled "Seleccionar archivo TRABE (ANL)"
-                        (if (vl-file-directory-p ocmema--default-project-dir) ocmema--default-project-dir "")
-                        "ANL;TXT;OUT" 4))
+  (setq file anlPath)
+  (if (or (not file) (= file ""))
+    (setq file (getfiled "Seleccionar archivo TRABE (ANL)"
+                          (if (vl-file-directory-p ocmema--default-project-dir) ocmema--default-project-dir "")
+                          "ANL;TXT;OUT" 4))
+  )
   (if (not file) (exit))
   (setq filename (vl-filename-base file)) (princ "\n1. Leyendo Geometria y Materiales...")
   (setq fp (open file "r"))
@@ -983,4 +986,5 @@
   (princ)
 )
 
-(defun c:DIBUJAR_TRABE_V13 () (c:DIBUJAR_TRABE_SIMPLE))
+(defun c:DIBUJAR_TRABE_SIMPLE () (ocmema:beam:const-armar-from-anl nil))
+(defun c:DIBUJAR_TRABE_V13 () (ocmema:beam:const-armar-from-anl nil))

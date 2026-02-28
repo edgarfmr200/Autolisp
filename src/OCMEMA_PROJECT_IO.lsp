@@ -460,6 +460,209 @@
   )
 )
 
+(defun ocmema:require-project-sidecar-lsp (filename / path src-dir project-dir io-path io-dir dwg-dir candidates resolved loaded)
+  (setq src-dir (if ocmema:*project* (ocmema:pio-assoc-get "src_dir" ocmema:*project*) nil))
+  (setq project-dir (if (and ocmema:*project-path* (/= ocmema:*project-path* ""))
+                      (vl-filename-directory ocmema:*project-path*)
+                      nil
+                    ))
+  (setq io-path (findfile "OCMEMA_PROJECT_IO.lsp"))
+  (setq io-dir (if io-path (vl-filename-directory io-path) nil))
+  (setq dwg-dir (getvar "DWGPREFIX"))
+  (setq candidates
+    (list
+      (if (and src-dir (/= src-dir "")) (ocmema:proj-join-path src-dir filename) nil)
+      (if (and project-dir (/= project-dir "")) (ocmema:proj-join-path project-dir filename) nil)
+      (if (and io-dir (/= io-dir "")) (ocmema:proj-join-path io-dir filename) nil)
+      (if (and dwg-dir (/= dwg-dir "")) (ocmema:proj-join-path dwg-dir filename) nil)
+      filename
+    )
+  )
+  (setq resolved nil)
+  (foreach path candidates
+    (if (and (not resolved) path (/= path ""))
+      (progn
+        (ocmema:dbg-io (strcat "require-sidecar-lsp: probando ruta " path))
+        (setq resolved (findfile path))
+      )
+    )
+  )
+  (if resolved
+    (progn
+      (ocmema:dbg-io (strcat "require-sidecar-lsp: usando ruta " resolved))
+      (setq loaded (ocmema:load-safe resolved))
+      (if loaded
+        T
+        nil
+      )
+    )
+    nil
+  )
+)
+
+(defun ocmema:require-beam-const ()
+  (if (ocmema:require-project-sidecar-lsp "DIBUJAR_TRABES_V0.lsp")
+    T
+    (progn
+      (ocmema:proj-warn "No se pudo cargar DIBUJAR_TRABES_V0.lsp")
+      nil
+    )
+  )
+)
+
+(defun ocmema:require-beam-var ()
+  (if (ocmema:require-project-sidecar-lsp "DIBUJAR_TRABE_V_FINAL_FIXED10.lsp")
+    T
+    (progn
+      (ocmema:proj-warn "No se pudo cargar DIBUJAR_TRABE_V_FINAL_FIXED10.lsp")
+      nil
+    )
+  )
+)
+
+(defun ocmema:beam:line-tokens (line / s)
+  (setq s (strcase (vl-string-translate "\t" " " (ocmema:str-trim line))))
+  (ocmema:pio-split-list s " ")
+)
+
+(defun ocmema:beam:token-index (tokens target / idx found)
+  (setq idx 0)
+  (setq found nil)
+  (while (and (< idx (length tokens)) (not found))
+    (if (= (nth idx tokens) target)
+      (setq found idx)
+      (setq idx (1+ idx))
+    )
+  )
+  found
+)
+
+(defun ocmema:beam:line-section-key (line / tokens idx key)
+  (setq tokens (ocmema:beam:line-tokens line))
+  (setq idx (ocmema:beam:token-index tokens "PRI"))
+  (if (not idx)
+    (setq idx (ocmema:beam:token-index tokens "PRIS"))
+  )
+  (if (and idx (< (1+ idx) (length tokens)))
+    (setq key (ocmema:pio-join (ocmema:pio-sublist tokens (1+ idx) (length tokens)) " "))
+    (setq key nil)
+  )
+  key
+)
+
+(defun ocmema:beam:member-line-p (line / u tokens first second third)
+  (setq u (strcase (ocmema:str-trim line)))
+  (setq tokens (ocmema:beam:line-tokens u))
+  (if (and tokens (>= (length tokens) 3))
+    (progn
+      (setq first (nth 0 tokens))
+      (setq second (nth 1 tokens))
+      (setq third (nth 2 tokens))
+      (if (and first second third
+               (ocmema:pio-to-number (vl-string-translate "." "" first))
+               (ocmema:pio-to-number (vl-string-translate "." "" second))
+               (ocmema:pio-to-number (vl-string-translate "." "" third)))
+        T
+        nil
+      )
+    )
+    nil
+  )
+)
+
+(defun ocmema:beam:member-count-from-lines (lines / in-members count line u)
+  (setq in-members nil)
+  (setq count 0)
+  (foreach line lines
+    (setq u (strcase (ocmema:str-trim line)))
+    (cond
+      ((wcmatch u "*MEMBER INCIDENCES*")
+       (setq in-members T)
+      )
+      (in-members
+       (cond
+         ((= u "") (setq in-members nil))
+         ((or (wcmatch u "*ELEMENT PROPERTY*")
+              (wcmatch u "*MEMBER PROPERTY*")
+              (wcmatch u "*CONSTANTS*")
+              (wcmatch u "*SUPPORTS*")
+              (wcmatch u "*LOAD*")
+              (wcmatch u "*FINISH*"))
+          (setq in-members nil)
+         )
+         ((ocmema:beam:member-line-p line)
+          (setq count (1+ count))
+         )
+       )
+      )
+    )
+  )
+  (if (> count 0) count nil)
+)
+
+(defun ocmema:beam:detect-section-info (anlPath / lines line key unique-sections pri-count member-count mode)
+  (setq lines (ocmema:pio-read-lines anlPath))
+  (setq unique-sections '())
+  (setq pri-count 0)
+  (if lines
+    (foreach line lines
+      (setq key (ocmema:beam:line-section-key line))
+      (if key
+        (progn
+          (setq pri-count (1+ pri-count))
+          (if (not (member key unique-sections))
+            (setq unique-sections (append unique-sections (list key)))
+          )
+        )
+      )
+    )
+  )
+  (setq member-count (if lines (ocmema:beam:member-count-from-lines lines) nil))
+  (if (>= (length unique-sections) 2)
+    (setq mode "VAR")
+    (setq mode "CONST")
+  )
+  (if (and (= mode "VAR") member-count (/= pri-count member-count))
+    (ocmema:proj-warn "OCMEMA WARN: PRI count != MEMBER count (posible ANL raro). Aun asi se selecciono VAR por secciones distintas.")
+  )
+  (list
+    (cons "mode" mode)
+    (cons "uniqueSectionsCount" (length unique-sections))
+    (cons "priCount" pri-count)
+    (cons "memberCount" member-count)
+    (cons "sections" unique-sections)
+  )
+)
+
+(defun ocmema:beam:detect-section-mode (anlPath / info)
+  (setq info (ocmema:beam:detect-section-info anlPath))
+  (ocmema:pio-assoc-get "mode" info)
+)
+
+(defun ocmema:beam:run-const (anlPath / loaded)
+  (setq loaded (ocmema:require-beam-const))
+  (if loaded
+    (ocmema:safe-call 'ocmema:beam:const-armar-from-anl (list anlPath))
+    (list nil "No se pudo cargar DIBUJAR_TRABES_V0.lsp")
+  )
+)
+
+(defun ocmema:beam:run-var (anlPath / loaded)
+  (setq loaded (ocmema:require-beam-var))
+  (if loaded
+    (ocmema:safe-call 'ocmema:beam:var-armar-from-anl (list anlPath))
+    (list nil "No se pudo cargar DIBUJAR_TRABE_V_FINAL_FIXED10.lsp")
+  )
+)
+
+(defun ocmema:beam:run-by-mode (mode anlPath / res)
+  (if (= mode "VAR")
+    (setq res (ocmema:beam:run-var anlPath))
+    (setq res (ocmema:beam:run-const anlPath))
+  )
+  res
+)
+
 (defun ocmema:pl-find-number-in-string (s / i ch start out)
   (setq out nil)
   (setq i 1)
@@ -3950,11 +4153,12 @@
 (defun ocmema:menu-dibujar-armados (/ opt done)
   (setq done nil)
   (while (not done)
-    (initget "N R")
-    (setq opt (getkword "\nArmados [N Nervaduras/R Regresar] <R>: "))
+    (initget "N T R")
+    (setq opt (getkword "\nArmados [N Nervaduras/T Trabes/R Regresar] <R>: "))
     (cond
       ((or (not opt) (= opt "R")) (setq done T))
       ((= opt "N") (ocmema:menu-armados-nervaduras))
+      ((= opt "T") (ocmema:menu-armados-trabes))
     )
   )
   (princ)
@@ -4715,6 +4919,125 @@
 (defun C:OCMEMA_PROJ (/)
   (ocmema:proj-ensure-generators-loaded)
   (ocmema:menu-entry)
+  (princ)
+)
+
+(defun ocmema:menu-armados-trabes (/ opt done)
+  (setq done nil)
+  (while (not done)
+    (initget "U T R")
+    (setq opt (getkword "\nArmados Trabes [U Una/T Todas/R Regresar] <U>: "))
+    (cond
+      ((= opt "T")
+       (ocmema:armados-trabes-todas)
+      )
+      ((or (not opt) (= opt "U"))
+       (ocmema:armados-trabes-una)
+      )
+      ((= opt "R") (setq done T))
+    )
+  )
+  (princ)
+)
+
+(defun ocmema:armados-trabes-una (/ path info mode res fallback cmdName)
+  (setq path (getfiled "Selecciona ANL de trabe" (ocmema:pl-default-beam-dir) "ANL" 0))
+  (if (not path)
+    (ocmema:proj-cancelled)
+    (if (not (findfile path))
+      (ocmema:proj-warn (strcat "Archivo ANL no encontrado: " path))
+      (progn
+        (setq info (ocmema:beam:detect-section-info path))
+        (setq mode (ocmema:pio-assoc-get "mode" info))
+        (ocmema:proj-log
+          (strcat
+            "OCMEMA: Trabe " (vl-filename-base path)
+            " mode=" mode
+            " uniqueSectionsCount=" (itoa (ocmema:pio-assoc-get "uniqueSectionsCount" info))
+            " priCount=" (itoa (ocmema:pio-assoc-get "priCount" info))
+            " memberCount=" (if (ocmema:pio-assoc-get "memberCount" info) (itoa (ocmema:pio-assoc-get "memberCount" info)) "nil")
+          )
+        )
+        (princ (strcat "\nArmando trabe: " (vl-filename-base path) ".ANL"))
+        (setq res (ocmema:beam:run-by-mode mode path))
+        (if (not (car res))
+          (progn
+            (if (= mode "VAR")
+              (setq cmdName "DIBUJAR_TRABE_V_FINAL")
+              (setq cmdName "DIBUJAR_TRABE_SIMPLE")
+            )
+            (ocmema:proj-log (strcat "Fallback interactivo: ejecutando " cmdName))
+            (setq fallback (ocmema:safe-call 'command (list cmdName)))
+            (if (not (car fallback))
+              (ocmema:proj-warn (strcat "No se pudo ejecutar armado de trabe ni fallback interactivo: " (cadr res) " | " (cadr fallback)))
+            )
+          )
+        )
+      )
+    )
+  )
+  (princ)
+)
+
+(defun ocmema:armados-trabes-todas (/ folder files f path info mode res total ok fail failed_list batch-ready err-upper)
+  (setq folder (ocmema:safe-pick-folder "Selecciona carpeta con archivos .ANL" (ocmema:pl-default-beam-dir)))
+  (if (not folder)
+    (ocmema:proj-cancelled)
+    (progn
+      (setq files (ocmema:list-anl folder))
+      (if (not files)
+        (ocmema:proj-log "OCMEMA: No se encontraron archivos ANL en la carpeta.")
+        (progn
+          (setq total (length files))
+          (setq ok 0)
+          (setq fail 0)
+          (setq failed_list '())
+          (setq batch-ready T)
+          (foreach f files
+            (if batch-ready
+              (progn
+                (setq path (ocmema:proj-join-path folder f))
+                (if (not (findfile path))
+                  (progn
+                    (setq fail (1+ fail))
+                    (setq failed_list (append failed_list (list f)))
+                    (ocmema:proj-warn (strcat "Archivo ANL no encontrado: " path))
+                  )
+                  (progn
+                    (setq info (ocmema:beam:detect-section-info path))
+                    (setq mode (ocmema:pio-assoc-get "mode" info))
+                    (princ (strcat "\nArmando trabe: " f " mode=" mode))
+                    (setq res (ocmema:beam:run-by-mode mode path))
+                    (if (car res)
+                      (setq ok (1+ ok))
+                      (progn
+                        (setq err-upper (strcase (cadr res)))
+                        (if (and (= ok 0) (= fail 0) (wcmatch err-upper "*NO FUNCTION DEFINITION*"))
+                          (progn
+                            (setq batch-ready nil)
+                            (ocmema:proj-warn "No se puede batch: falta entrypoint del armador de trabes. Modo interactivo no es compatible con batch.")
+                          )
+                          (progn
+                            (setq fail (1+ fail))
+                            (setq failed_list (append failed_list (list f)))
+                            (ocmema:proj-warn (strcat "OCMEMA WARN: fallo " f " -> " (cadr res)))
+                          )
+                        )
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+          (ocmema:proj-log (strcat "OCMEMA: Batch trabes -> total=" (itoa total) " ok=" (itoa ok) " fallidas=" (itoa fail)))
+          (if failed_list
+            (ocmema:proj-log (strcat "OCMEMA: Fallidas: " (ocmema:pio-join failed_list ", ")))
+          )
+        )
+      )
+    )
+  )
   (princ)
 )
 
