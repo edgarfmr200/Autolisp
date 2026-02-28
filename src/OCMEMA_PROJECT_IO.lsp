@@ -117,27 +117,13 @@
   (ocmema:dbg-section-lines lines tag "[/PLANT]")
 )
 
-(defun ocmema:dbg-file-size (path / sz r lines line hasF hasV)
+(defun ocmema:dbg-file-size (path / sz r lines line hasV)
   (setq sz nil)
-  (setq hasF (vl-catch-all-apply 'fboundp (list 'fboundp)))
-  (if (vl-catch-all-error-p hasF)
-    (ocmema:dbg-verify-skipped "fboundp")
-    (progn
-      (setq hasV (vl-catch-all-apply 'fboundp (list 'vl-file-size)))
-      (if (vl-catch-all-error-p hasV)
-        (setq hasV nil)
-      )
-      (if (not hasV)
-        (ocmema:dbg-verify-skipped "vl-file-size")
-        (if (findfile path)
-          (progn
-            (setq r (vl-catch-all-apply 'vl-file-size (list path)))
-            (if (not (vl-catch-all-error-p r))
-              (setq sz r)
-            )
-          )
-        )
-      )
+  (setq hasV (vl-catch-all-apply 'vl-file-size (list path)))
+  (if (vl-catch-all-error-p hasV)
+    (ocmema:dbg-verify-skipped "vl-file-size")
+    (if (findfile path)
+      (setq sz hasV)
     )
   )
   (if (not sz)
@@ -399,6 +385,79 @@
     (setq files (vl-directory-files folder "*.ANL" 1))
   )
   files
+)
+
+(defun ocmema:list-anl (folder / files)
+  (setq files (ocmema:pl-list-anl-files folder))
+  (if (and files (listp files))
+    (vl-sort files '<)
+    nil
+  )
+)
+
+(defun ocmema:load-safe (path / r)
+  (setq r (vl-catch-all-apply 'load (list path)))
+  (if (vl-catch-all-error-p r)
+    (progn
+      (ocmema:proj-warn (strcat "OCMEMA WARN: no se pudo cargar " path " (" (vl-catch-all-error-message r) ")"))
+      nil
+    )
+    T
+  )
+)
+
+(defun ocmema:safe-call (fn args / r)
+  (setq r (vl-catch-all-apply fn args))
+  (if (vl-catch-all-error-p r)
+    (list nil (vl-catch-all-error-message r))
+    (list T r)
+  )
+)
+
+(defun ocmema:require-nerv-armado (/ path src-dir project-dir io-path io-dir dwg-dir candidates resolved loaded)
+  (setq src-dir (if ocmema:*project* (ocmema:pio-assoc-get "src_dir" ocmema:*project*) nil))
+  (setq project-dir (if (and ocmema:*project-path* (/= ocmema:*project-path* ""))
+                      (vl-filename-directory ocmema:*project-path*)
+                      nil
+                    ))
+  (setq io-path (findfile "OCMEMA_PROJECT_IO.lsp"))
+  (setq io-dir (if io-path (vl-filename-directory io-path) nil))
+  (setq dwg-dir (getvar "DWGPREFIX"))
+  (setq candidates
+    (list
+      (if (and src-dir (/= src-dir "")) (ocmema:proj-join-path src-dir "DIBUJAR_NERV.lsp") nil)
+      (if (and project-dir (/= project-dir "")) (ocmema:proj-join-path project-dir "DIBUJAR_NERV.lsp") nil)
+      (if (and io-dir (/= io-dir "")) (ocmema:proj-join-path io-dir "DIBUJAR_NERV.lsp") nil)
+      (if (and dwg-dir (/= dwg-dir "")) (ocmema:proj-join-path dwg-dir "DIBUJAR_NERV.lsp") nil)
+      "DIBUJAR_NERV.lsp"
+    )
+  )
+  (setq resolved nil)
+  (foreach path candidates
+    (if (and (not resolved) path (/= path ""))
+      (progn
+        (ocmema:dbg-io (strcat "require-nerv-armado: probando ruta " path))
+        (setq resolved (findfile path))
+      )
+    )
+  )
+  (if resolved
+    (progn
+      (ocmema:dbg-io (strcat "require-nerv-armado: usando ruta " resolved))
+      (setq loaded (ocmema:load-safe resolved))
+      (if loaded
+        T
+        (progn
+          (ocmema:proj-warn "No se pudo cargar DIBUJAR_NERV.lsp o no define ocmema:nerv:armar-from-anl")
+          nil
+        )
+      )
+    )
+    (progn
+      (ocmema:proj-warn "No se pudo cargar DIBUJAR_NERV.lsp o no define ocmema:nerv:armar-from-anl")
+      nil
+    )
+  )
 )
 
 (defun ocmema:pl-find-number-in-string (s / i ch start out)
@@ -3881,8 +3940,39 @@
     (setq opt (getkword "\nDibujar [A Armados/P Planta/R Regresar] <R>: "))
     (cond
       ((or (not opt) (= opt "R")) (setq done T))
-      ((= opt "A") (ocmema:proj-log "Pendiente: Dibujar Armados"))
+      ((= opt "A") (ocmema:menu-dibujar-armados))
       ((= opt "P") (ocmema:menu-dibujar-planta))
+    )
+  )
+  (princ)
+)
+
+(defun ocmema:menu-dibujar-armados (/ opt done)
+  (setq done nil)
+  (while (not done)
+    (initget "N R")
+    (setq opt (getkword "\nArmados [N Nervaduras/R Regresar] <R>: "))
+    (cond
+      ((or (not opt) (= opt "R")) (setq done T))
+      ((= opt "N") (ocmema:menu-armados-nervaduras))
+    )
+  )
+  (princ)
+)
+
+(defun ocmema:menu-armados-nervaduras (/ opt done)
+  (setq done nil)
+  (while (not done)
+    (initget "U T R")
+    (setq opt (getkword "\nArmados Nervaduras [U Una/T Todas/R Regresar] <U>: "))
+    (cond
+      ((or (not opt) (= opt "R")) (setq done T))
+      ((or (not opt) (= opt "U"))
+       (ocmema:armados-nervaduras-una)
+      )
+      ((= opt "T")
+       (ocmema:armados-nervaduras-todas)
+      )
     )
   )
   (princ)
@@ -3914,6 +4004,35 @@
 
 (defun ocmema:pl-default-beam-dir (/ dir path base)
   (setq dir (if ocmema:*project* (ocmema:pio-assoc-get "dir_beams_std" ocmema:*project*) nil))
+  (if (and dir (/= dir ""))
+    (ocmema:proj-ensure-dir-sep dir)
+    (progn
+      (setq path ocmema:*project-path*)
+      (setq base (if (and path (/= path "")) (vl-filename-directory path) nil))
+      (if (and base (/= base ""))
+        (ocmema:proj-ensure-dir-sep base)
+        (progn
+          (setq base (getvar "DWGPREFIX"))
+          (if (and base (/= base ""))
+            (ocmema:proj-ensure-dir-sep base)
+            ocmema:*proj-default-dir*
+          )
+        )
+      )
+    )
+  )
+)
+
+(defun ocmema:proj-join-path (dir leaf / base)
+  (setq base (ocmema:proj-ensure-dir-sep dir))
+  (if (= base "")
+    leaf
+    (strcat base leaf)
+  )
+)
+
+(defun ocmema:pl-default-rib-dir (/ dir path base)
+  (setq dir (if ocmema:*project* (ocmema:pio-assoc-get "dir_ribs_std" ocmema:*project*) nil))
   (if (and dir (/= dir ""))
     (ocmema:proj-ensure-dir-sep dir)
     (progn
@@ -4310,6 +4429,103 @@
   )
 )
 
+(defun ocmema:armados-nervaduras-una (/ path loaded res fallback)
+  (setq path (getfiled "Selecciona ANL de nervadura" (ocmema:pl-default-rib-dir) "ANL" 0))
+  (if (not path)
+    (ocmema:proj-cancelled)
+    (if (not (findfile path))
+      (ocmema:proj-warn (strcat "Archivo ANL no encontrado: " path))
+      (progn
+        (setq loaded (ocmema:require-nerv-armado))
+        (princ (strcat "\nArmando: " (vl-filename-base path) ".ANL"))
+        (setq res (ocmema:safe-call 'ocmema:nerv:armar-from-anl (list path)))
+        (if (car res)
+          T
+          (progn
+            (if (and (not loaded) (findfile "DIBUJAR_NERV.lsp"))
+              (ocmema:load-safe (findfile "DIBUJAR_NERV.lsp"))
+            )
+            (ocmema:proj-log "Fallback: ejecutando DIBUJAR_NERV interactivo")
+            (setq fallback (ocmema:safe-call 'command (list "DIBUJAR_NERV")))
+            (if (not (car fallback))
+              (ocmema:proj-warn (strcat "No se pudo ejecutar entrypoint ni fallback interactivo: " (cadr res) " | " (cadr fallback)))
+            )
+          )
+        )
+      )
+    )
+  )
+  (princ)
+)
+
+(defun ocmema:armados-nervaduras-todas (/ folder files f path res total ok fail failed_list batch-ready err-upper)
+  (if (not (ocmema:require-nerv-armado))
+    (progn
+      (ocmema:proj-log "No se puede batch porque falta ocmema:nerv:armar-from-anl. Abriendo modo UNA/Interactivo")
+      (ocmema:proj-log "OCMEMA: No existe ocmema:nerv:armar-from-anl; no se puede batch.")
+    )
+    (progn
+      (setq folder (ocmema:safe-pick-folder "Selecciona carpeta con archivos .ANL" (ocmema:pl-default-rib-dir)))
+      (if (not folder)
+        (ocmema:proj-cancelled)
+        (progn
+          (setq files (ocmema:list-anl folder))
+          (if (not files)
+            (ocmema:proj-log "OCMEMA: No se encontraron archivos ANL en la carpeta.")
+            (progn
+              (setq total (length files))
+              (setq ok 0)
+              (setq fail 0)
+              (setq failed_list '())
+              (setq batch-ready T)
+              (foreach f files
+                (if batch-ready
+                  (progn
+                    (setq path (ocmema:proj-join-path folder f))
+                    (if (not (findfile path))
+                      (progn
+                        (setq fail (1+ fail))
+                        (setq failed_list (append failed_list (list f)))
+                        (ocmema:proj-warn (strcat "Archivo ANL no encontrado: " path))
+                      )
+                      (progn
+                        (princ (strcat "\nArmando: " f))
+                        (setq res (ocmema:safe-call 'ocmema:nerv:armar-from-anl (list path)))
+                        (if (car res)
+                          (setq ok (1+ ok))
+                          (progn
+                            (setq err-upper (strcase (cadr res)))
+                            (if (and (= ok 0) (= fail 0) (wcmatch err-upper "*NO FUNCTION DEFINITION*"))
+                              (progn
+                                (setq batch-ready nil)
+                                (ocmema:proj-warn "No se puede batch: falta entrypoint ocmema:nerv:armar-from-anl. Modo interactivo no es compatible con batch.")
+                              )
+                              (progn
+                                (setq fail (1+ fail))
+                                (setq failed_list (append failed_list (list f)))
+                                (ocmema:proj-warn (strcat "OCMEMA WARN: fallo " f " -> " (cadr res)))
+                              )
+                            )
+                          )
+                        )
+                      )
+                    )
+                  )
+                )
+              )
+              (ocmema:proj-log (strcat "OCMEMA: Batch nervaduras -> total=" (itoa total) " ok=" (itoa ok) " fallidas=" (itoa fail)))
+              (if failed_list
+                (ocmema:proj-log (strcat "OCMEMA: Fallidas: " (ocmema:pio-join failed_list ", ")))
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+  (princ)
+)
+
 (defun ocmema:menu-dibujar-planta-trabes (/ opt done)
   (if (not (ocmema:pl-project-beams-valid-p))
     (ocmema:proj-log "Proyecto invalido o sin trabes.")
@@ -4502,7 +4718,14 @@
   (princ)
 )
 
+(defun C:OCMEMA_ARMADOS_NERV (/)
+  (ocmema:menu-armados-nervaduras)
+  (princ)
+)
+
+(princ "\nOCMEMA_PROJECT_IO.lsp loaded.\n")
 (princ)
+
 
 
 

@@ -10,7 +10,7 @@
 ;; 5) En superior: mostrar Req - Min al pedir varillas (en cm2 reales)
 ;; ==============================================================================
 
-(defun c:DIBUJAR_NERV (/ *error* file dir filename tempFile wsh cmd fp line 
+(defun ocmema:nerv:armar-from-anl (anlPath / *error* file dir filename tempFile wsh cmd fp line 
                         coordList YD ZB startX endX l_total_cm l_total_m h_cm b_cm 
                         h_draw rectLen ptOrigin xOrigin yOrigin oldOsnap p1 p2 
                         idx numNodes hasAxis axisName posType drawX extraX 
@@ -262,15 +262,21 @@
   (if (not (tblsearch "LTYPE" "CENTER")) (command "-LINETYPE" "Load" "CENTER" "acad.lin" ""))
 
   ;; ==============================================================================
-  ;; 2. LECTURA DE DATOS
+  ;; 2. LECTURA DE DATOS (desde anlPath)
   ;; ==============================================================================
-  (setq file (getfiled
-               "Seleccionar archivo STAAD"
-               "C:\\Users\\edgar\\OneDrive - ITESO\\OCMEMA_IE\\01. PROYECTOS\\"
-               "ANL;TXT;OUT"
-               4
-             ))
-  (if (not file) (exit))
+  (setq file anlPath)
+  (if (or (not file) (= file ""))
+    (progn
+      (prompt "\nOCMEMA WARN: ruta ANL vacia.")
+      (exit)
+    )
+  )
+  (if (not (findfile file))
+    (progn
+      (prompt "\nOCMEMA WARN: archivo ANL no encontrado.")
+      (exit)
+    )
+  )
 
   (setq filename (vl-filename-base file))
   (princ "\n1. Leyendo Geometria...")
@@ -663,4 +669,20 @@
   (princ "\nGeneracion completada.")
   (princ)
 )
+
+;; Wrapper interactivo: mantiene UX y habilita batch desde OCMEMA_PROJECT_IO
+(defun c:DIBUJAR_NERV (/ anl)
+  (setq anl (getfiled
+              "Seleccionar archivo STAAD"
+              "C:\\Users\\edgar\\OneDrive - ITESO\\OCMEMA_IE\\01. PROYECTOS\\"
+              "ANL;TXT;OUT"
+              4
+            ))
+  (if anl
+    (ocmema:nerv:armar-from-anl anl)
+  )
+  (princ)
+)
+
+(princ)
 
