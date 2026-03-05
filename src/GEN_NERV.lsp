@@ -2,7 +2,8 @@
                      nervName numClaros hasCantilever cantPos spanLengths coordList i spanLen 
                      totalLen memberCount supportStr loadCount loadType loadVal d1 d2
                      projName units scale points rawLen dir delta genMode typedLen change dirPref
-                     plants plantIdx plantSel plantName useSaved updateSaved newplants pl spanStr meta)
+                     plants plantIdx plantSel plantName useSaved updateSaved newplants pl spanStr meta
+                     comboRes comboSet comboTitle comboFactors include14Combo)
 
   (vl-load-com)
 
@@ -78,6 +79,33 @@
   ;; Generamos el nombre del material dinámicamente, ej: fc_250
   (setq matName (strcat "fc_" (rtos fc 2 0)))
   (setq ancho_nerv 10.0) 
+
+  (if (not ocmema:*project*)
+    (progn
+      (prompt "\nOCMEMA ERROR: Proyecto no cargado; no se puede obtener LOAD_COMBO_SET. Carga proyecto con OCMEMA_PROJ primero.")
+      (exit)
+    )
+  )
+  (setq comboRes (ocmema:safe-call 'ocmema:proj-ensure-load-combo-set '()))
+  (if (not (car comboRes))
+    (progn
+      (prompt "\nOCMEMA ERROR: Proyecto no cargado; no se puede obtener LOAD_COMBO_SET. Carga proyecto con OCMEMA_PROJ primero.")
+      (exit)
+    )
+  )
+  (setq comboSet (cadr comboRes))
+  (if (= comboSet "13_15")
+    (progn
+      (setq comboTitle "LOAD COMB 3 1.3 CM + 1.5 CV")
+      (setq comboFactors "1 1.3 2 1.5")
+      (setq include14Combo nil)
+    )
+    (progn
+      (setq comboTitle "LOAD COMB 3 1.2 CM + 1.6 CV")
+      (setq comboFactors "1 1.2 2 1.6")
+      (setq include14Combo T)
+    )
+  )
 
   ;; Variable para almacenar la ruta elegida la primera vez
   (setq dirPath nil)
@@ -415,7 +443,7 @@
         ;; Asignamos el material con nombre dinámico
         (write-line (strcat "MATERIAL " matName " ALL") file)
         (write-line "MEMBER CRACKED" file)
-        (write-line (strcat "1 TO " (itoa memberCount) " REDUCTION RIY 0.5") file)
+        (write-line (strcat "1 TO " (itoa memberCount) " REDUCTION RIZ 0.5") file)
 
         ;; 6. SOPORTES
         (write-line "* --- CONDICIONES DE APOYO ---" file)
@@ -509,12 +537,16 @@
         )
 
         (write-line "* --- COMBINACIONES DE CARGA ---" file)
-        (write-line "LOAD COMB 3 1.2 CM + 1.6 CV" file)
-        (write-line "1 1.2 2 1.6" file)
+        (write-line comboTitle file)
+        (write-line comboFactors file)
         (write-line "LOAD COMB 4 CM + CV" file)
         (write-line "1 1.0 2 1.0" file)
-        (write-line "LOAD COMB 5 1.4 CM" file)
-        (write-line "1 1.4" file)
+        (if include14Combo
+          (progn
+            (write-line "LOAD COMB 5 1.4 CM" file)
+            (write-line "1 1.4" file)
+          )
+        )
 
         (write-line "PERFORM ANALYSIS" file)
         

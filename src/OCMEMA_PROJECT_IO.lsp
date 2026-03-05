@@ -1279,10 +1279,6 @@
       (ocmema:proj-msg "No hay proyecto cargado. Usa Nuevo o Cargar.")
       nil
     )
-    ((not (ocmema:proj-axes-complete-p))
-      (ocmema:proj-msg "Primero captura ejes (X/Y) para todas las plantas.")
-      nil
-    )
     (T T)
   )
 )
@@ -1955,8 +1951,8 @@
       )
       (setq plants (ocmema:pio-assoc-get "plants" proj))
       (foreach plant plants
-        (setq cx (length (ocmema:pio-assoc-get "x_axes" plant)))
-        (setq cy (length (ocmema:pio-assoc-get "y_axes" plant)))
+        (setq cx (length (if (ocmema:pio-assoc-get "x_axes" plant) (ocmema:pio-assoc-get "x_axes" plant) '())))
+        (setq cy (length (if (ocmema:pio-assoc-get "y_axes" plant) (ocmema:pio-assoc-get "y_axes" plant) '())))
         (prompt
           (strcat
             "\nOCMEMA DBG: PLANT "
@@ -2069,6 +2065,75 @@
   (setq ok (ocmema:proj-autosave))
   (setq ocmema:*save-caller* prev)
   ok
+)
+
+(defun ocmema:proj-normalize-load-combo-set (raw / up)
+  (setq up (if raw (strcase (ocmema:str-trim raw)) ""))
+  (cond
+    ((= up "13_15") "13_15")
+    (T "12_16")
+  )
+)
+
+(defun ocmema:proj-load-combo-set-label (comboSet / normalized)
+  (setq normalized (ocmema:proj-normalize-load-combo-set comboSet))
+  (if (= normalized "13_15") "B" "A")
+)
+
+(defun ocmema:proj-get-load-combo-set (/)
+  (if ocmema:*project*
+    (ocmema:proj-normalize-load-combo-set (ocmema:pio-assoc-get "load_combo_set" ocmema:*project*))
+    "12_16"
+  )
+)
+
+(defun ocmema:proj-prompt-load-combo-set-choice (/ choice)
+  (initget "A B")
+  (setq choice (getkword "\nCombinaciones factorizadas D+L: [A 1.2D+1.6L / B 1.3D+1.5L] <A>: "))
+  (if (= choice "B") "13_15" "12_16")
+)
+
+(defun ocmema:proj-ensure-load-combo-set (/ raw current label useSaved comboSet saveChoice res)
+  (if (not ocmema:*project*)
+    (progn
+      (ocmema:proj-warn "OCMEMA ERROR: Proyecto no cargado; no se puede obtener LOAD_COMBO_SET. Carga proyecto con OCMEMA_PROJ primero.")
+      nil
+    )
+    (progn
+      (setq raw (ocmema:pio-assoc-get "load_combo_set" ocmema:*project*))
+      (setq current (ocmema:proj-normalize-load-combo-set raw))
+      (if (and raw (/= (ocmema:str-trim raw) ""))
+        (progn
+          (setq label (ocmema:proj-load-combo-set-label current))
+          (initget "S N")
+          (setq useSaved (getkword (strcat "\nUsar combinaciones factorizadas guardadas (" label ")? [S/N] <S>: ")))
+          (if (or (not useSaved) (= useSaved "S"))
+            current
+            (progn
+              (setq comboSet (ocmema:proj-prompt-load-combo-set-choice))
+              (setq ocmema:*project* (ocmema:pio-alist-set "load_combo_set" comboSet ocmema:*project*))
+              (initget "S N")
+              (setq saveChoice (getkword "\nGuardar/actualizar esta preferencia en el TXT del proyecto? [S/N] <S>: "))
+              (if (or (not saveChoice) (= saveChoice "S"))
+                (setq res (ocmema:proj-autosave-from "LOAD_COMBO_SET update"))
+              )
+              comboSet
+            )
+          )
+        )
+        (progn
+          (setq comboSet (ocmema:proj-prompt-load-combo-set-choice))
+          (setq ocmema:*project* (ocmema:pio-alist-set "load_combo_set" comboSet ocmema:*project*))
+          (initget "S N")
+          (setq saveChoice (getkword "\nGuardar esta preferencia en el TXT del proyecto? [S/N] <S>: "))
+          (if (or (not saveChoice) (= saveChoice "S"))
+            (setq res (ocmema:proj-autosave-from "LOAD_COMBO_SET init"))
+          )
+          comboSet
+        )
+      )
+    )
+  )
 )
 
 ;; File dialogs (local, no VisualLISP)
@@ -2767,6 +2832,8 @@
       (if v (setq lines (append lines (list (strcat "FC_KGCM2=" (rtos v 2 4))))))
       (setq v (ocmema:pio-assoc-get "ec_kgcm2" proj))
       (if v (setq lines (append lines (list (strcat "EC_KGCM2=" (rtos v 2 4))))))
+      (setq v (ocmema:pio-assoc-get "load_combo_set" proj))
+      (if v (setq lines (append lines (list (strcat "LOAD_COMBO_SET=" v)))))
       (setq v (ocmema:pio-assoc-get "dir_beams_std" proj))
       (if v (setq lines (append lines (list (strcat "DIR_BEAMS_STD=" v)))))
       (setq v (ocmema:pio-assoc-get "dir_ribs_std" proj))
@@ -2985,7 +3052,7 @@
                                             in-beams in-ribs
                                             ribs rib-name rib-plant-idx rib-dir rib-spacing rib-nclear rib-npoints rib-points rib-meta
                                             plants beams nplants nx ny wall xnames ynames projname proj-beam-unit
-                                            file-version parse-start draw_units draw_scale fc ec dir_beams dir_ribs)
+                                            file-version parse-start draw_units draw_scale fc ec dir_beams dir_ribs load_combo_set)
   (setq len (length lines))
   (setq i 0)
   (setq vline nil)
@@ -3074,6 +3141,7 @@
         (setq ec nil)
         (setq dir_beams nil)
         (setq dir_ribs nil)
+        (setq load_combo_set nil)
 
         (setq i parse-start)
         (while (< i len)
@@ -3406,6 +3474,7 @@
                                              ((= key "DRAW_SCALE") (setq draw_scale (ocmema:pio-to-number val)))
                                              ((= key "FC_KGCM2") (setq fc (ocmema:pio-to-number val)))
                                              ((= key "EC_KGCM2") (setq ec (ocmema:pio-to-number val)))
+                                             ((= key "LOAD_COMBO_SET") (setq load_combo_set (ocmema:proj-normalize-load-combo-set val)))
                                              ((= key "DIR_BEAMS_STD") (setq dir_beams val))
                                              ((= key "DIR_RIBS_STD") (setq dir_ribs val))
                                              ((= key "BEAM_UNIT") (setq proj-beam-unit val))
@@ -3515,6 +3584,7 @@
               (cons "draw_scale_factor" draw_scale)
               (cons "fc_kgcm2" fc)
               (cons "ec_kgcm2" ec)
+              (cons "load_combo_set" load_combo_set)
               (cons "dir_beams_std" dir_beams)
               (cons "dir_ribs_std" dir_ribs)
               (cons "plants" plants)
@@ -3799,9 +3869,10 @@
                 (setq names (ocmema:pio-assoc-get "x_names" proj))
                 (setq names (ocmema:pio-assoc-get "y_names" proj))
               )
+              (if (not names) (setq names '()))
               (setq actualName (ocmema:pio-find-name-ci names axisName))
               (if (not actualName)
-                (ocmema:proj-log "Eje no existe.")
+                (ocmema:proj-log "Eje no existe. Si el proyecto no tiene ejes, usa ModificarEjes > Todos > NuevosEjes.")
                 (progn
                   (initget "N C R")
                   (setq opt (getkword "\nEje [N CambiarNombre/C CambiarCoordenada/R Regresar] <R>: "))
@@ -4754,7 +4825,7 @@
 )
 
 ;; Public: new project flow
-(defun ocmema:proj-new (/ pname nplants i plname wall nx ny xnames ynames plants path ok name oldproj oldpath olddir savepath)
+(defun ocmema:proj-new (/ pname nplants i plname wall nx ny xnames ynames plants path ok name oldproj oldpath olddir savepath addAxesNow)
   (setq oldproj ocmema:*project*)
   (setq oldpath ocmema:*project-path*)
   (setq olddir ocmema:*last-project-dir*)
@@ -4804,37 +4875,36 @@
               (if (not wall)
                 (progn (ocmema:proj-cancelled) nil)
                 (progn
-                  (setq nx (ocmema:pio-getint-min "\nNumero de ejes X: " 1))
-                  (if (not nx)
-                    (progn (ocmema:proj-cancelled) nil)
+                  (setq ok T)
+                  (initget "S N")
+                  (setq addAxesNow (getkword "\nAgregar ejes al proyecto ahora? [S/N] <N>: "))
+                  (if (or (not addAxesNow) (= addAxesNow "N"))
                     (progn
-                      (setq ny (ocmema:pio-getint-min "\nNumero de ejes Y: " 1))
-                      (if (not ny)
+                      (setq nx 0)
+                      (setq ny 0)
+                      (setq xnames '())
+                      (setq ynames '())
+                      (if ocmema:*debug-io*
+                        (ocmema:dbg-io "[DEBUG] Ejes omitidos al crear proyecto (modo sin ejes).")
+                      )
+                    )
+                    (progn
+                      (setq nx (ocmema:pio-getint-min "\nNumero de ejes X: " 1))
+                      (if (not nx)
                         (progn (ocmema:proj-cancelled) nil)
                         (progn
-                          (setq xnames '())
-                          (setq ok T)
-                          (repeat nx
-                            (if ok
-                              (progn
-                                (setq name (ocmema:pio-get-unique-axis-name (strcat "\nNombre eje X " (itoa (1+ (length xnames))) ": ") xnames))
-                                (if name
-                                  (setq xnames (append xnames (list name)))
-                                  (setq ok nil)
-                                )
-                              )
-                            )
-                          )
-                          (if (not ok)
+                          (setq ny (ocmema:pio-getint-min "\nNumero de ejes Y: " 1))
+                          (if (not ny)
                             (progn (ocmema:proj-cancelled) nil)
                             (progn
-                              (setq ynames '())
-                              (repeat ny
+                              (setq xnames '())
+                              (setq ok T)
+                              (repeat nx
                                 (if ok
                                   (progn
-                                    (setq name (ocmema:pio-get-unique-axis-name (strcat "\nNombre eje Y " (itoa (1+ (length ynames))) ": ") ynames))
+                                    (setq name (ocmema:pio-get-unique-axis-name (strcat "\nNombre eje X " (itoa (1+ (length xnames))) ": ") xnames))
                                     (if name
-                                      (setq ynames (append ynames (list name)))
+                                      (setq xnames (append xnames (list name)))
                                       (setq ok nil)
                                     )
                                   )
@@ -4843,51 +4913,90 @@
                               (if (not ok)
                                 (progn (ocmema:proj-cancelled) nil)
                                 (progn
-                                  (setq ocmema:*project*
-                                    (list
-                                      (cons "version" ocmema:*project-io-version*)
-                                      (cons "project_name" pname)
-                                      (cons "n_plants" nplants)
-                                      (cons "wall_cm" wall)
-                                      (cons "nx" nx)
-                                      (cons "ny" ny)
-                                      (cons "x_names" xnames)
-                                      (cons "y_names" ynames)
-                                      (cons "units" nil)
-                                      (cons "scale" nil)
-                                      (cons "beams" '())
-                                      (cons "ribs" '())
-                                      (cons "project_path" savepath)
-                                      (cons "plants" plants)
-                                    )
-                                  )
-                                  (if (ocmema:pio-capture-all-axes)
-                                    (progn
-                                      (setq path savepath)
-                                      (if (ocmema:pio-save-project path)
-                                        (progn
-                                          (ocmema:proj-update-path-state path)
-                                          (ocmema:proj-log "Proyecto guardado.")
-                                          ocmema:*project*
-                                        )
-                                        (progn
-                                          (setq ocmema:*project* oldproj)
-                                          (setq ocmema:*project-path* oldpath)
-                                          (setq ocmema:*last-project-dir* olddir)
-                                          (ocmema:proj-log "No se pudo guardar el proyecto.")
-                                          nil
+                                  (setq ynames '())
+                                  (repeat ny
+                                    (if ok
+                                      (progn
+                                        (setq name (ocmema:pio-get-unique-axis-name (strcat "\nNombre eje Y " (itoa (1+ (length ynames))) ": ") ynames))
+                                        (if name
+                                          (setq ynames (append ynames (list name)))
+                                          (setq ok nil)
                                         )
                                       )
                                     )
-                                    (progn
-                                      (setq ocmema:*project* oldproj)
-                                      (setq ocmema:*project-path* oldpath)
-                                      (setq ocmema:*last-project-dir* olddir)
-                                      nil
-                                    )
+                                  )
+                                  (if (not ok)
+                                    (progn (ocmema:proj-cancelled) nil)
                                   )
                                 )
                               )
+                            )
+                          )
+                        )
+                      )
+                    )
+                  )
+                  (if (not ok)
+                    nil
+                    (progn
+                      (setq ocmema:*project*
+                        (list
+                          (cons "version" ocmema:*project-io-version*)
+                          (cons "project_name" pname)
+                          (cons "n_plants" nplants)
+                          (cons "wall_cm" wall)
+                          (cons "nx" nx)
+                          (cons "ny" ny)
+                          (cons "x_names" xnames)
+                          (cons "y_names" ynames)
+                          (cons "units" nil)
+                          (cons "scale" nil)
+                          (cons "beams" '())
+                          (cons "ribs" '())
+                          (cons "project_path" savepath)
+                          (cons "plants" plants)
+                        )
+                      )
+                      (if (> (+ nx ny) 0)
+                        (if (ocmema:pio-capture-all-axes)
+                          (progn
+                            (setq path savepath)
+                            (if (ocmema:pio-save-project path)
+                              (progn
+                                (ocmema:proj-update-path-state path)
+                                (ocmema:proj-log "Proyecto guardado.")
+                                ocmema:*project*
+                              )
+                              (progn
+                                (setq ocmema:*project* oldproj)
+                                (setq ocmema:*project-path* oldpath)
+                                (setq ocmema:*last-project-dir* olddir)
+                                (ocmema:proj-log "No se pudo guardar el proyecto.")
+                                nil
+                              )
+                            )
+                          )
+                          (progn
+                            (setq ocmema:*project* oldproj)
+                            (setq ocmema:*project-path* oldpath)
+                            (setq ocmema:*last-project-dir* olddir)
+                            nil
+                          )
+                        )
+                        (progn
+                          (setq path savepath)
+                          (if (ocmema:pio-save-project path)
+                            (progn
+                              (ocmema:proj-update-path-state path)
+                              (ocmema:proj-log "Proyecto guardado.")
+                              ocmema:*project*
+                            )
+                            (progn
+                              (setq ocmema:*project* oldproj)
+                              (setq ocmema:*project-path* oldpath)
+                              (setq ocmema:*last-project-dir* olddir)
+                              (ocmema:proj-log "No se pudo guardar el proyecto.")
+                              nil
                             )
                           )
                         )
