@@ -1695,6 +1695,27 @@
   found
 )
 
+(defun ocmema:proj-update-rib-points (name points / proj ribs out item found)
+  (setq proj ocmema:*project*)
+  (setq ribs (ocmema:proj-get-ribs))
+  (setq out '())
+  (setq found nil)
+  (foreach item ribs
+    (if (= (ocmema:pio-normalize-name (ocmema:pio-assoc-get "name" item))
+           (ocmema:pio-normalize-name name))
+      (progn
+        (setq item (ocmema:pio-alist-set "points_raw" points item))
+        (setq item (ocmema:pio-alist-set "n_points" (length points) item))
+        (setq found T)
+      )
+    )
+    (setq out (append out (list item)))
+  )
+  (setq proj (ocmema:pio-alist-set "ribs" out proj))
+  (setq ocmema:*project* proj)
+  found
+)
+
 (defun ocmema:proj-get-units (/ proj unit)
   (setq proj ocmema:*project*)
   (setq unit (ocmema:pio-assoc-get "units" proj))
@@ -1708,6 +1729,8 @@
 
 (defun ocmema:proj-set-units-scale (unit scale / proj)
   (setq proj ocmema:*project*)
+  (setq proj (ocmema:pio-alist-set "draw_units" unit proj))
+  (setq proj (ocmema:pio-alist-set "draw_scale_factor" scale proj))
   (setq proj (ocmema:pio-alist-set "units" unit proj))
   (setq proj (ocmema:pio-alist-set "scale" scale proj))
   (setq ocmema:*project* proj)
@@ -3840,12 +3863,56 @@
 (defun ocmema:menu-modificar-ejes (/ opt done)
   (setq done nil)
   (while (not done)
-    (initget "U T R")
-    (setq opt (getkword "\nModificar ejes [U Uno/T Todos/R Regresar] <R>: "))
+    (initget "U T E R")
+    (setq opt (getkword "\nModificar ejes [U Uno/T Todos/E EscalaDibujo/R Regresar] <R>: "))
     (cond
       ((or (not opt) (= opt "R")) (setq done T))
       ((= opt "U") (ocmema:menu-modificar-ejes-uno))
       ((= opt "T") (ocmema:menu-modificar-ejes-todos))
+      ((= opt "E") (ocmema:menu-config-draw-scale))
+    )
+  )
+  (princ)
+)
+
+(defun ocmema:menu-config-draw-scale (/ proj units scale)
+  (setq proj ocmema:*project*)
+  (if (not proj)
+    (ocmema:proj-log "No hay proyecto cargado.")
+    (progn
+      (initget "CM M MM")
+      (setq units (getkword
+                    (strcat
+                      "\nUnidades de captura [CM/M/MM] <"
+                      (if (ocmema:pio-assoc-get "draw_units" proj)
+                        (ocmema:pio-assoc-get "draw_units" proj)
+                        "M")
+                      ">: ")))
+      (if (not units)
+        (setq units (if (ocmema:pio-assoc-get "draw_units" proj)
+                      (ocmema:pio-assoc-get "draw_units" proj)
+                      "M"))
+      )
+      (setq scale (getreal
+                    (strcat
+                      "\nFactor de escala de dibujo <"
+                      (rtos (if (ocmema:pio-assoc-get "draw_scale_factor" proj)
+                              (ocmema:pio-assoc-get "draw_scale_factor" proj)
+                              1.0) 2 3)
+                      ">: ")))
+      (if (not scale)
+        (setq scale (if (ocmema:pio-assoc-get "draw_scale_factor" proj)
+                      (ocmema:pio-assoc-get "draw_scale_factor" proj)
+                      1.0))
+      )
+      (if (<= scale 0.0)
+        (ocmema:proj-log "Factor invalido.")
+        (progn
+          (ocmema:proj-set-units-scale units scale)
+          (ocmema:proj-autosave-from "project menu: set draw scale")
+          (ocmema:proj-log (strcat "Escala de dibujo guardada. Unidades=" units " factor=" (rtos scale 2 3)))
+        )
+      )
     )
   )
   (princ)
@@ -4164,7 +4231,7 @@
   (princ)
 )
 
-(defun ocmema:menu-modificar-nervadura (/ name rib opt dir)
+(defun ocmema:menu-modificar-nervadura (/ name rib opt dir points ok)
   (setq name (getstring T "\nNombre exacto de la nervadura: "))
   (if (not name)
     (ocmema:proj-cancelled)
@@ -4173,21 +4240,38 @@
       (if (not rib)
         (ocmema:proj-log "Nervadura no existe.")
         (progn
-          (initget "D N R")
-          (setq opt (getkword "\nModificar [D DireccionSoloTXT/N NuevoSTD/R Regresar] <R>: "))
+          (initget "P D N R")
+          (setq opt (getkword "\nModificar [P Puntos(solo TXT)/D DireccionSoloTXT/N NuevoSTD/R Regresar] <R>: "))
           (cond
             ((or (not opt) (= opt "R")) nil)
+            ((= opt "P")
+             (setq points (ocmema:proj-capture-points))
+             (if (not points)
+               (princ "\nOCMEMA: Cancelado. No se hicieron cambios.")
+               (progn
+                 (setq ok (ocmema:proj-update-rib-points (ocmema:pio-assoc-get "name" rib) points))
+                 (if ok
+                   (progn
+                     (ocmema:proj-autosave-from "project menu: modify rib points")
+                     (princ (strcat "\nOCMEMA: Puntos actualizados para nervadura " (ocmema:pio-assoc-get "name" rib) "."))
+                   )
+                   (princ "\nOCMEMA: Cancelado. No se hicieron cambios.")
+                 )
+               )
+             )
+            )
             ((= opt "D")
              (initget "H V")
              (setq dir (getkword "\nDireccion [H Horizontal/V Vertical] <H>: "))
              (if (not dir) (setq dir "H"))
-             (ocmema:proj-upsert-rib
-               (list
-                 (cons "name" (ocmema:pio-assoc-get "name" rib))
-                 (cons "dir" dir)
-                 (cons "spacing" (ocmema:pio-assoc-get "spacing" rib))
-                 (cons "n_clear" (ocmema:pio-assoc-get "n_clear" rib))
+             (setq ok
+               (ocmema:proj-update-rib
+                 (ocmema:pio-assoc-get "name" rib)
+                 (list (cons "dir" dir))
                )
+             )
+             (if (not ok)
+               (ocmema:proj-warn "No se pudo actualizar la direccion de la nervadura.")
              )
              (ocmema:proj-autosave-from "project menu: modify rib direction")
             )
