@@ -10,7 +10,7 @@
 (defun ocmema:beam:const-armar-from-anl (anlPath / *error* file dir filename tempFile wsh cmd fp line 
                             coordList YD ZB startX endX l_total_cm l_total_m h_cm b_cm 
                             h_draw rectLen ptOrigin xOrigin yOrigin oldOsnap p1 p2 
-                            idx numNodes hasAxis axisName posType drawX extraX 
+                            idx numNodes hasAxis axisName posType drawX extraX supportNodes
                             pAxisBot pAxisTop centerCircle axisXList dimXList axisCenter
                             dataMode strList valX nodeID
                             tokenList i len token currentDist xOffsetGlobal 
@@ -69,6 +69,48 @@
       (if (< dist min_dist) (progn (setq min_dist dist) (setq best_axis axis)))
     )
     best_axis
+  )
+
+  (defun ocmema--support-ids-from-line (rawLine / toks out i cur nxt tmp)
+    (setq out '())
+    (if (and rawLine (> (strlen rawLine) 0))
+      (progn
+        (setq toks (read (strcat "(" (vl-string-translate "." " " (clean-string rawLine)) ")")))
+        (setq i 0)
+        (while (< i (length toks))
+          (setq cur (nth i toks))
+          (cond
+            ((numberp cur)
+              (if (and (< (+ i 2) (length toks))
+                       (eq (nth (1+ i) toks) 'TO)
+                       (numberp (nth (+ i 2) toks)))
+                (progn
+                  (setq nxt (nth (+ i 2) toks))
+                  (if (> cur nxt)
+                    (progn (setq tmp cur) (setq cur nxt) (setq nxt tmp))
+                  )
+                  (while (<= cur nxt)
+                    (if (not (member cur out))
+                      (setq out (append out (list cur)))
+                    )
+                    (setq cur (1+ cur))
+                  )
+                  (setq i (+ i 3))
+                )
+                (progn
+                  (if (not (member cur out))
+                    (setq out (append out (list cur)))
+                  )
+                  (setq i (1+ i))
+                )
+              )
+            )
+            (T (setq i (length toks)))
+          )
+        )
+      )
+    )
+    out
   )
 
   (defun obtener-x-interpolada (x1 y1 x2 y2 target)
@@ -439,7 +481,7 @@
   (if (not file) (exit))
   (setq filename (vl-filename-base file)) (princ "\n1. Leyendo Geometria y Materiales...")
   (setq fp (open file "r"))
-  (setq coordList nil YD 25.0 ZB 10.0 dataMode nil fc_val 200.0)
+  (setq coordList nil YD 25.0 ZB 10.0 dataMode nil fc_val 200.0 supportNodes '())
 
   (while (setq line (read-line fp))
     (setq line (vl-string-trim " \t" line))
@@ -450,7 +492,10 @@
       ((and (= dataMode "NODES") (or (wcmatch line "*MEMBER INCIDENCES*") (wcmatch line "*INCIDENCIAS*"))) (setq dataMode nil))
       ((and (= dataMode "NODES") (> (strlen line) 0)) (if (numberp (read (substr line 1 1))) (progn (setq strList (read (strcat "(" (vl-string-translate "." " " line) ")"))) (setq valX nil nodeID nil) (cond ((>= (length strList) 5) (setq nodeID (nth 1 strList)) (setq valX (nth 2 strList))) ((= (length strList) 4) (setq nodeID (nth 0 strList)) (setq valX (nth 1 strList)))) (if (numberp valX) (setq coordList (append coordList (list (list nodeID valX))))))))
       ((wcmatch line "*MEMBER PROPERTY*") (setq dataMode "PROPS"))
+      ((wcmatch line "*SUPPORTS*") (setq dataMode "SUPPORTS"))
+      ((or (wcmatch line "*UNIT *") (wcmatch line "*START CONCRETE DESIGN*")) (if (= dataMode "SUPPORTS") (setq dataMode nil)))
       ((and (= dataMode "PROPS") (wcmatch line "*PRIS*")) (if (setq pos (vl-string-search "YD" line)) (setq YD (atof (substr line (+ pos 4) 5)))) (if (setq pos (vl-string-search "ZB" line)) (setq ZB (atof (substr line (+ pos 4) 5))) (if (setq pos (vl-string-search "ZD" line)) (setq ZB (atof (substr line (+ pos 4) 5))))) (setq dataMode nil))
+      ((and (= dataMode "SUPPORTS") (> (strlen line) 0)) (foreach nSupp (ocmema--support-ids-from-line line) (if (not (member nSupp supportNodes)) (setq supportNodes (append supportNodes (list nSupp))))))
     )
   )
   (close fp)
@@ -510,14 +555,19 @@
   (setq axisXList '()) (setq idx 0 numNodes (length coordList) dimXList '())
   (foreach node coordList
     (setq nID (car node) nX_m (/ (- (cadr node) startX) 100.0))
-    (setq hasAxis "Si") (setq axisName (strcat "E-" (itoa (1+ idx)))) 
+    (setq hasAxis (or (= idx 0) (= idx (1- numNodes)) (member nID supportNodes))) (setq axisName (strcat "E-" (itoa (1+ idx)))) 
     (setq drawX 0.0 extraX nil)
     (cond ((= idx 0) (setq drawX (+ (car p1) 0.5))) ((= idx (1- numNodes)) (setq drawX (+ (car p1) 0.5 nX_m))) (t (setq drawX (+ (car p1) 0.5 nX_m))))
-    (setq axisCenter (+ (car p1) 0.5 nX_m)) (setq axisXList (append axisXList (list axisCenter))) (setq dimXList (append dimXList (list axisCenter)))
-    (setq pAxisBot (list drawX (- yOrigin 0.5)) pAxisTop (list drawX (+ yOrigin h_draw 1.25)))
-    (command "_.LINE" pAxisBot pAxisTop "") (command "_.CHPROP" (entlast) "" "Color" 1 "Ltype" "CENTER" "Ltscale" 0.3 "")
-    (if extraX (progn (command "_.LINE" (list extraX (- yOrigin 0.5)) (list extraX (+ yOrigin h_draw 1.25)) "") (command "_.CHPROP" (entlast) "" "Color" 1 "Ltype" "CENTER" "Ltscale" 0.3 "")))
-    (if (= hasAxis "Si") (progn (setq centerCircle (list drawX (+ (cadr pAxisTop) 0.275))) (command "_.CIRCLE" centerCircle 0.275) (command "_.CHPROP" (entlast) "" "Color" 7 "") (command "_.TEXT" "_MC" centerCircle 0.22 0 (itoa (1+ idx))) (command "_.CHPROP" (entlast) "" "Color" 4 "")))
+    (setq axisCenter (+ (car p1) 0.5 nX_m))
+    (if hasAxis
+      (progn
+        (setq axisXList (append axisXList (list axisCenter))) (setq dimXList (append dimXList (list axisCenter)))
+        (setq pAxisBot (list drawX (- yOrigin 0.5)) pAxisTop (list drawX (+ yOrigin h_draw 1.25)))
+        (command "_.LINE" pAxisBot pAxisTop "") (command "_.CHPROP" (entlast) "" "Color" 1 "Ltype" "CENTER" "Ltscale" 0.3 "")
+        (if extraX (progn (command "_.LINE" (list extraX (- yOrigin 0.5)) (list extraX (+ yOrigin h_draw 1.25)) "") (command "_.CHPROP" (entlast) "" "Color" 1 "Ltype" "CENTER" "Ltscale" 0.3 "")))
+        (setq centerCircle (list drawX (+ (cadr pAxisTop) 0.275))) (command "_.CIRCLE" centerCircle 0.275) (command "_.CHPROP" (entlast) "" "Color" 7 "") (command "_.TEXT" "_MC" centerCircle 0.22 0 (itoa (1+ idx))) (command "_.CHPROP" (entlast) "" "Color" 4 "")
+      )
+    )
     (setq idx (1+ idx))
   )
   (setq yTopRed (+ yOrigin h_draw 1.25) yDimLoc (- yTopRed 0.25) i 0)

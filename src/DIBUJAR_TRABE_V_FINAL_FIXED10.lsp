@@ -7,7 +7,7 @@
 ;;  - Construye cadena continua, ordena por X y aborta si no es continua
 ;;  - Soporta hasta 2 tipos de sección (abort si >2)
 ;;  - Alineación Superior/Inferior: contorno longitudinal variable (cara plana + cara escalonada)
-;;  - Ejes: en nodos + ejes rojos sin burbuja en cambios de sección
+;;  - Ejes: en apoyos + ejes rojos sin burbuja en cambios de sección
 ;;  - Acero longitudinal con regla de reciprocidad (cara plana continua + cara escalonada con 2 aceros)
 ;;  - Bastones: conserva lógica V13, pero Ld = 12*ϕ (cm) por extremo (ya no +0.20 m fijo)
 ;;  - Sección transversal: 1 o 2 secciones (A-A y B-B). La peraltada se dibuja compuesta tipo T invertida (simplificada)
@@ -32,13 +32,13 @@
                                 alignChoice isAlignSup isAlignInf
                                 yMin_global yMax_global h_draw_global
                                 axisXList dimXList idx numNodes node nID nX_cm nX_m
-                                drawX axisCenter pAxisBot pAxisTop centerCircle
+                                drawX axisCenter pAxisBot pAxisTop centerCircle hasAxis supportNodes
                                 yTopRed yDimLoc i
                                 yAxisText xLabel labelStr
 
                                 ;; Contorno variable
                                 xDrawStart xDrawEnd
-                                tramo t_x1m t_x2m t_hcm t_bcm t_key
+                                tramo t_x1m t_x2m t_hcm t_bcm t_key t_yd t_zd t_yb t_zb
                                 ptsContour
                                 yMin_env yMax_env
 
@@ -417,6 +417,61 @@
     )
   )
 
+  (defun _support-ids-from-line (rawLine / toks out i cur nxt tmp)
+    (setq out '())
+    (if (and rawLine (> (strlen rawLine) 0))
+      (progn
+        (setq toks (read (strcat "(" (vl-string-translate "." " " (clean-string rawLine)) ")")))
+        (setq i 0)
+        (while (< i (length toks))
+          (setq cur (nth i toks))
+          (cond
+            ((numberp cur)
+              (if (and (< (+ i 2) (length toks))
+                       (eq (nth (1+ i) toks) 'TO)
+                       (numberp (nth (+ i 2) toks)))
+                (progn
+                  (setq nxt (nth (+ i 2) toks))
+                  (if (> cur nxt)
+                    (progn (setq tmp cur) (setq cur nxt) (setq nxt tmp))
+                  )
+                  (while (<= cur nxt)
+                    (if (not (member cur out))
+                      (setq out (append out (list cur)))
+                    )
+                    (setq cur (1+ cur))
+                  )
+                  (setq i (+ i 3))
+                )
+                (progn
+                  (if (not (member cur out))
+                    (setq out (append out (list cur)))
+                  )
+                  (setq i (1+ i))
+                )
+              )
+            )
+            (T (setq i (length toks)))
+          )
+        )
+      )
+    )
+    out
+  )
+
+  (defun _append-unique-float (lst v tol / hit item)
+    (setq hit nil)
+    (foreach item lst
+      (if (<= (abs (- item v)) tol)
+        (setq hit T)
+      )
+    )
+    (if hit
+      lst
+      (append lst (list v))
+    )
+  )
+
   ;; Parsear f'c desde "FC 200" o "FC_200"
   (defun _try-parse-fc (ln / p s numStr ch i)
     (cond
@@ -450,6 +505,7 @@
     )
   )
 
+  (setq supportNodes '())
   (while (setq line (read-line fp))
     (setq line (vl-string-trim " \t" line))
 
@@ -465,11 +521,16 @@
       ;; Entrar a bloque PROPIEDADES
       ((wcmatch line "*MEMBER PROPERTY*") (setq dataMode "PROPS"))
 
+      ;; Entrar a bloque APOYOS
+      ((wcmatch line "*SUPPORTS*") (setq dataMode "SUPPORTS"))
+
       ;; Salir de bloque si viene otra cabecera típica
       ((or (wcmatch line "*DEFINE MATERIAL*")
            (wcmatch line "*CONSTANTS*")
-           (wcmatch line "*LOAD*"))
-       (if (or (= dataMode "NODES") (= dataMode "MEMBERS") (= dataMode "PROPS")) (setq dataMode nil))
+           (wcmatch line "*LOAD*")
+           (wcmatch line "*UNIT *")
+           (wcmatch line "*START CONCRETE DESIGN*"))
+       (if (or (= dataMode "NODES") (= dataMode "MEMBERS") (= dataMode "PROPS") (= dataMode "SUPPORTS")) (setq dataMode nil))
       )
 
       ;; Leer nodos: soporta líneas con "11. 1 0 0 0" o "1 0 0 0"
@@ -530,22 +591,44 @@
         ;; Mantener estilo: traducir "." a " " para soportar "33."
         (setq tokenList (read (strcat "(" (vl-string-translate "." " " cleanLine) ")")))
         ;; member id
-        (setq mID nil t_hcm nil t_bcm nil)
+        (setq mID nil t_hcm nil t_bcm nil t_yd nil t_zd nil t_yb nil t_zb nil)
         (cond
           ((and (>= (length tokenList) 2) (numberp (nth 1 tokenList))) (setq mID (nth 1 tokenList)))
           ((and (>= (length tokenList) 1) (numberp (nth 0 tokenList))) (setq mID (nth 0 tokenList)))
         )
-        ;; escanear YD / ZD / ZB
+        ;; escanear YD / ZD / YB / ZB
         (setq i 0)
         (while (< i (length tokenList))
           (cond
-            ((and (eq (nth i tokenList) 'YD) (numberp (nth (1+ i) tokenList))) (setq t_hcm (nth (1+ i) tokenList)))
-            ((and (or (eq (nth i tokenList) 'ZD) (eq (nth i tokenList) 'ZB)) (numberp (nth (1+ i) tokenList))) (setq t_bcm (nth (1+ i) tokenList)))
+            ((and (eq (nth i tokenList) 'YD) (numberp (nth (1+ i) tokenList))) (setq t_yd (nth (1+ i) tokenList)))
+            ((and (eq (nth i tokenList) 'ZD) (numberp (nth (1+ i) tokenList))) (setq t_zd (nth (1+ i) tokenList)))
+            ((and (eq (nth i tokenList) 'YB) (numberp (nth (1+ i) tokenList))) (setq t_yb (nth (1+ i) tokenList)))
+            ((and (eq (nth i tokenList) 'ZB) (numberp (nth (1+ i) tokenList))) (setq t_zb (nth (1+ i) tokenList)))
           )
           (setq i (1+ i))
         )
+        (if (and (numberp t_yb) (numberp t_zb))
+          (progn
+            (setq t_hcm t_yd)
+            (setq t_bcm (if (numberp t_zd) t_zd t_zb))
+          )
+          (progn
+            (setq t_hcm (if (numberp t_yd) t_yd t_yb))
+            (cond
+              ((numberp t_zd) (setq t_bcm t_zd))
+              ((numberp t_zb) (setq t_bcm t_zb))
+            )
+          )
+        )
         (if (and (numberp mID) (numberp t_bcm) (numberp t_hcm))
           (setq memberProp (_put memberProp mID (list t_bcm t_hcm)))
+        )
+      )
+      ((and (= dataMode "SUPPORTS") (> (strlen line) 0))
+        (foreach nSupp (_support-ids-from-line line)
+          (if (not (member nSupp supportNodes))
+            (setq supportNodes (append supportNodes (list nSupp)))
+          )
         )
       )
     )
@@ -892,21 +975,25 @@
     (setq nX_m (/ (- nX_cm startX) 100.0))
     (setq drawX (+ (car p1) 0.5 nX_m))
     (setq axisCenter drawX)
+    (setq hasAxis (or (= idx 0) (= idx (1- numNodes)) (member nID supportNodes)))
+    (if hasAxis
+      (progn
+        (setq axisXList (append axisXList (list axisCenter)))
+        (setq dimXList (append dimXList (list axisCenter)))
 
-    (setq axisXList (append axisXList (list axisCenter)))
-    (setq dimXList (append dimXList (list axisCenter)))
+        (setq pAxisBot (list drawX (- yMin_global 0.5)))
+        (setq pAxisTop (list drawX (+ yMax_global 1.25)))
 
-    (setq pAxisBot (list drawX (- yMin_global 0.5)))
-    (setq pAxisTop (list drawX (+ yMax_global 1.25)))
+        (command "_.LINE" pAxisBot pAxisTop "")
+        (command "_.CHPROP" (entlast) "" "Color" 1 "Ltype" "CENTER" "Ltscale" 0.3 "")
 
-    (command "_.LINE" pAxisBot pAxisTop "")
-    (command "_.CHPROP" (entlast) "" "Color" 1 "Ltype" "CENTER" "Ltscale" 0.3 "")
-
-    (setq centerCircle (list drawX (+ (cadr pAxisTop) 0.275)))
-    (command "_.CIRCLE" centerCircle 0.275)
-    (command "_.CHPROP" (entlast) "" "Color" 7 "")
-    (command "_.TEXT" "_MC" centerCircle 0.22 0 (itoa (1+ idx)))
-    (command "_.CHPROP" (entlast) "" "Color" 4 "")
+        (setq centerCircle (list drawX (+ (cadr pAxisTop) 0.275)))
+        (command "_.CIRCLE" centerCircle 0.275)
+        (command "_.CHPROP" (entlast) "" "Color" 7 "")
+        (command "_.TEXT" "_MC" centerCircle 0.22 0 (itoa (1+ idx)))
+        (command "_.CHPROP" (entlast) "" "Color" 4 "")
+      )
+    )
 
     (setq idx (1+ idx))
   )
@@ -929,7 +1016,11 @@
     (setq drawX (+ (car p1) 0.5 bx))
     (command "_.LINE" (list drawX (- yMin_global 0.5)) (list drawX (+ yMax_global 1.25)) "")
     (command "_.CHPROP" (entlast) "" "Color" 1 "Ltype" "CENTER" "Ltscale" 0.3 "")
+    (setq axisXList (_append-unique-float axisXList drawX 1e-6))
+    (setq dimXList (_append-unique-float dimXList drawX 1e-6))
   )
+  (setq axisXList (vl-sort axisXList '(lambda (a b) (< a b))))
+  (setq dimXList (vl-sort dimXList '(lambda (a b) (< a b))))
 
   ;; Cotas entre ejes (como V13)
   (setq yTopRed (+ yMax_global 1.25))
@@ -1109,7 +1200,7 @@
 
       ;; Acero peraltada (D3.2): siempre se solicita en zona peraltada
       (setq b_per_cm (ocmema--num-safe bDeep))
-      (setq h_per_cm (- (ocmema--num-safe hDeep) 2.5))
+      (setq h_per_cm (ocmema--num-safe hDeep))
       (if (< h_per_cm 0.0) (setq h_per_cm 0.0))
       (if (or (<= b_per_cm 0.0) (<= h_per_cm 0.0) (null fc_val) (null fy_val))
         (progn
@@ -1659,10 +1750,17 @@
                 )
               )
 
+              (if (<= (abs (- segX1 startNodeX)) tol)
+                (setq x_baston_ini (min x_baston_ini (- startNodeX 0.25)))
+              )
+              (if (<= (abs (- segX2 endNodeX)) tol)
+                (setq x_baston_fin (max x_baston_fin (+ endNodeX 0.25)))
+              )
+
               (setq x_baston_ini (+ x_baston_ini coverTrim))
               (setq x_baston_fin (- x_baston_fin coverTrim))
-              (if (< x_baston_ini x_ini) (setq x_baston_ini x_ini))
-              (if (> x_baston_fin x_fin) (setq x_baston_fin x_fin))
+              (if (< x_baston_ini xBeamStart) (setq x_baston_ini xBeamStart))
+              (if (> x_baston_fin xBeamEnd) (setq x_baston_fin xBeamEnd))
 
               (if (> x_baston_fin x_baston_ini)
                 (progn
