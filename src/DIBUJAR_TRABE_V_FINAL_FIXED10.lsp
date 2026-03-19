@@ -23,6 +23,7 @@
                                 nodeXcm memberNodes memberProp
                                 coordList startX endX l_total_cm l_total_m
                                 tramosOrdenados uniqueKeys keyList
+                                keyA keyB stA stB bA hA bB hB keyDeep keyWide
                                 hMax_cm bMax_cm hMin_cm bMin_cm
                                 fc_val
 
@@ -32,9 +33,9 @@
                                 alignChoice isAlignSup isAlignInf
                                 yMin_global yMax_global h_draw_global
                                 axisXList dimXList idx numNodes node nID nX_cm nX_m
-                                drawX axisCenter pAxisBot pAxisTop centerCircle hasAxis supportNodes
+                                drawX extraX axisCenter pAxisBot pAxisTop centerCircle hasAxis supportNodes
                                 yTopRed yDimLoc i
-                                yAxisText xLabel labelStr
+                                yAxisText xLabel labelStr axisName posType drawRed isChange
 
                                 ;; Contorno variable
                                 xDrawStart xDrawEnd
@@ -295,27 +296,12 @@
   )
 
   ;; NUEVO: calc-puntos con Ld variable (m). Mantiene misma lógica de redondeo y ejes.
-  (defun calc-puntos-vFINAL (x_interp_start x_interp_end axis_list Ld_m / t_start t_end ax_s ax_e dist_s dist_e round_s round_e final_s final_e tmp)
+  (defun calc-puntos-vFINAL (x_interp_start x_interp_end axis_list Ld_m / t_start t_end final_s final_e tmp baseRef)
     (setq t_start (- x_interp_start Ld_m))
     (setq t_end   (+ x_interp_end   Ld_m))
-    (setq ax_s (get-closest-axis t_start axis_list))
-    (if ax_s
-      (progn
-        (setq dist_s (abs (- t_start ax_s)))
-        (setq round_s (redondear-al-5 dist_s))
-        (setq final_s (if (< t_start ax_s) (- ax_s round_s) (+ ax_s round_s)))
-      )
-      (setq final_s t_start)
-    )
-    (setq ax_e (get-closest-axis t_end axis_list))
-    (if ax_e
-      (progn
-        (setq dist_e (abs (- t_end ax_e)))
-        (setq round_e (redondear-al-5 dist_e))
-        (setq final_e (if (< t_end ax_e) (- ax_e round_e) (+ ax_e round_e)))
-      )
-      (setq final_e t_end)
-    )
+    (setq baseRef (if (numberp xDrawStart) xDrawStart 0.0))
+    (setq final_s (+ baseRef (redondear-al-5 (- t_start baseRef))))
+    (setq final_e (+ baseRef (redondear-al-5 (- t_end baseRef))))
     (if (> final_s final_e) (progn (setq tmp final_s) (setq final_s final_e) (setq final_e tmp)))
     (list final_s final_e)
   )
@@ -470,6 +456,16 @@
       lst
       (append lst (list v))
     )
+  )
+
+  (defun _has-near-float (lst v tol / hit item)
+    (setq hit nil)
+    (foreach item lst
+      (if (<= (abs (- item v)) tol)
+        (setq hit T)
+      )
+    )
+    hit
   )
 
   ;; Parsear f'c desde "FC 200" o "FC_200"
@@ -756,6 +752,37 @@
     (setq bMin_cm (min bMin_cm t_bcm))
   )
 
+  (if (= (length uniqueKeys) 2)
+    (progn
+      (defun _sec-stats-pre (key / tr)
+        (setq tr nil)
+        (foreach trTmp tramosOrdenados
+          (if (and (null tr) (= (nth 6 trTmp) key))
+            (setq tr trTmp)
+          )
+        )
+        (if tr
+          (list (nth 4 tr) (nth 5 tr))
+          nil
+        )
+      )
+      (setq keyA (car uniqueKeys))
+      (setq keyB (cadr uniqueKeys))
+      (setq stA (_sec-stats-pre keyA))
+      (setq stB (_sec-stats-pre keyB))
+      (if (and stA stB)
+        (progn
+          (setq bA (car stA) hA (cadr stA))
+          (setq bB (car stB) hB (cadr stB))
+          (if (or (> hA hB) (and (= hA hB) (> bA bB)))
+            (progn (setq keyDeep keyA) (setq keyWide keyB))
+            (progn (setq keyDeep keyB) (setq keyWide keyA))
+          )
+        )
+      )
+    )
+  )
+
   ;; Resumen consola (K)
   (princ (strcat "\nNodos leidos: " (itoa (length coordList)) " | Miembros: " (itoa (length tramosOrdenados))))
   (princ "\nTramos (mID, L_m, b_cm, h_cm, key):")
@@ -845,6 +872,36 @@
 (setq xDrawStart (+ xBeamStart 0.5))           ;; centro eje 1
 (setq xDrawEnd   (+ xBeamStart 0.5 l_total_m)) ;; centro último eje
 
+(defun _tramo-step-left-x (idx / tr prevTr xBase)
+  (setq tr (nth idx tramosOrdenados))
+  (setq xBase (if (= idx 0) xBeamStart (+ xDrawStart (nth 1 tr))))
+  (if (> idx 0)
+    (progn
+      (setq prevTr (nth (1- idx) tramosOrdenados))
+      (cond
+        ((and (= (nth 6 tr) keyDeep) (/= (nth 6 prevTr) keyDeep)) (setq xBase (- xBase 0.25)))
+        ((and (/= (nth 6 tr) keyDeep) (= (nth 6 prevTr) keyDeep)) (setq xBase (+ xBase 0.25)))
+      )
+    )
+  )
+  xBase
+)
+
+(defun _tramo-step-right-x (idx / tr nextTr xBase)
+  (setq tr (nth idx tramosOrdenados))
+  (setq xBase (if (= idx (1- (length tramosOrdenados))) xBeamEnd (+ xDrawStart (nth 2 tr))))
+  (if (< idx (1- (length tramosOrdenados)))
+    (progn
+      (setq nextTr (nth (1+ idx) tramosOrdenados))
+      (cond
+        ((and (= (nth 6 tr) keyDeep) (/= (nth 6 nextTr) keyDeep)) (setq xBase (+ xBase 0.25)))
+        ((and (/= (nth 6 tr) keyDeep) (= (nth 6 nextTr) keyDeep)) (setq xBase (- xBase 0.25)))
+      )
+    )
+  )
+  xBase
+)
+
 ;; Helper: yTop/yBot por tramo (en coordenadas de dibujo)
 (defun _tramo-yTop (tr / hdraw)
   (setq hdraw (* (/ (nth 5 tr) 100.0) 7.0))
@@ -877,7 +934,7 @@
       (setq tr (nth i tramosOrdenados))
       (setq xStart_m (nth 1 tr))
       (setq currY (_tramo-yTop tr))
-      (setq xL (if (= i 0) xBeamStart (+ xDrawStart xStart_m)))
+      (setq xL (_tramo-step-left-x i))
 
       (setq ptsContour (append ptsContour (list (list xL currY))))
 
@@ -905,7 +962,7 @@
       (setq tr (nth i tramosOrdenados))
       (setq xStart_m (nth 1 tr))
       (setq currY (_tramo-yBot tr))
-      (setq xL (if (= i 0) xBeamStart (+ xDrawStart xStart_m)))
+      (setq xL (_tramo-step-left-x i))
 
       (setq ptsContour (append ptsContour (list (list xL currY))))
 
@@ -975,8 +1032,69 @@
     (setq nX_m (/ (- nX_cm startX) 100.0))
     (setq drawX (+ (car p1) 0.5 nX_m))
     (setq axisCenter drawX)
-    (setq hasAxis (or (= idx 0) (= idx (1- numNodes)) (member nID supportNodes)))
-    (if hasAxis
+    (setq isChange (and (> idx 0)
+                        (< idx (length tramosOrdenados))
+                        (/= (nth 6 (nth (1- idx) tramosOrdenados))
+                            (nth 6 (nth idx tramosOrdenados)))))
+    (setq axisName "")
+    (setq posType "Centrado")
+    (setq drawRed nil)
+    (setq extraX nil)
+    (cond
+      ((or (= idx 0) (= idx (1- numNodes)))
+        (princ (strcat "\nNodo extremo " (itoa nID) "..."))
+        (initget "Si No")
+        (setq hasAxis (getkword " Eje? [Si/No] <Si>: "))
+        (if (null hasAxis) (setq hasAxis "Si"))
+        (initget "Orillado Centrado")
+        (setq posType (getkword " Pos? [Orillado/Centrado] <Centrado>: "))
+        (if (null posType) (setq posType "Centrado"))
+        (setq hasAxis (= hasAxis "Si"))
+        (setq drawRed T)
+        (if hasAxis
+          (progn
+            (setq axisName (getstring T " Nombre del eje: "))
+            (if (= axisName "") (setq axisName (itoa (1+ idx))))
+          )
+        )
+        (if (= idx 0)
+          (if (= posType "Orillado")
+            (setq drawX (+ (car p1) 0.0) axisCenter (+ (car p1) 0.5) extraX (+ (car p1) 0.5))
+            (setq drawX (+ (car p1) 0.5) axisCenter (+ (car p1) 0.5))
+          )
+          (if (= posType "Orillado")
+            (setq drawX (+ (car p1) rectLen) axisCenter (+ (car p1) rectLen -0.5) extraX (+ (car p1) rectLen -0.5))
+            (setq drawX (+ (car p1) 0.5 nX_m) axisCenter (+ (car p1) 0.5 nX_m))
+          )
+        )
+      )
+      (T
+        (princ (strcat "\nNodo " (itoa nID) (if isChange " (cambio de seccion)..." "...")))
+        (initget "Si No")
+        (setq hasAxis (getkword (if isChange
+                                  " Eje? [Si/No] <No>: "
+                                  " Eje? [Si/No] <No>: ")))
+        (if (null hasAxis) (setq hasAxis "No"))
+        (setq hasAxis (= hasAxis "Si"))
+        (if hasAxis
+          (progn
+            (setq drawRed T)
+            (setq axisName (getstring T " Nombre del eje: "))
+            (if (= axisName "") (setq axisName (itoa (1+ idx))))
+          )
+          (if isChange
+            (setq drawRed T)
+            (progn
+              (initget "Si No")
+              (setq drawRed (getkword " Dibujar linea roja? [Si/No] <No>: "))
+              (if (null drawRed) (setq drawRed "No"))
+              (setq drawRed (= drawRed "Si"))
+            )
+          )
+        )
+      )
+    )
+    (if drawRed
       (progn
         (setq axisXList (append axisXList (list axisCenter)))
         (setq dimXList (append dimXList (list axisCenter)))
@@ -986,12 +1104,22 @@
 
         (command "_.LINE" pAxisBot pAxisTop "")
         (command "_.CHPROP" (entlast) "" "Color" 1 "Ltype" "CENTER" "Ltscale" 0.3 "")
+        (if extraX
+          (progn
+            (command "_.LINE" (list extraX (- yMin_global 0.5)) (list extraX (+ yMax_global 1.25)) "")
+            (command "_.CHPROP" (entlast) "" "Color" 1 "Ltype" "CENTER" "Ltscale" 0.3 "")
+          )
+        )
 
-        (setq centerCircle (list drawX (+ (cadr pAxisTop) 0.275)))
-        (command "_.CIRCLE" centerCircle 0.275)
-        (command "_.CHPROP" (entlast) "" "Color" 7 "")
-        (command "_.TEXT" "_MC" centerCircle 0.22 0 (itoa (1+ idx)))
-        (command "_.CHPROP" (entlast) "" "Color" 4 "")
+        (if hasAxis
+          (progn
+            (setq centerCircle (list drawX (+ (cadr pAxisTop) 0.275)))
+            (command "_.CIRCLE" centerCircle 0.275)
+            (command "_.CHPROP" (entlast) "" "Color" 7 "")
+            (command "_.TEXT" "_MC" centerCircle 0.22 0 axisName)
+            (command "_.CHPROP" (entlast) "" "Color" 4 "")
+          )
+        )
       )
     )
 
@@ -1014,10 +1142,14 @@
 
   (foreach bx boundaryXList
     (setq drawX (+ (car p1) 0.5 bx))
-    (command "_.LINE" (list drawX (- yMin_global 0.5)) (list drawX (+ yMax_global 1.25)) "")
-    (command "_.CHPROP" (entlast) "" "Color" 1 "Ltype" "CENTER" "Ltscale" 0.3 "")
-    (setq axisXList (_append-unique-float axisXList drawX 1e-6))
-    (setq dimXList (_append-unique-float dimXList drawX 1e-6))
+    (if (not (_has-near-float axisXList drawX 1e-6))
+      (progn
+        (command "_.LINE" (list drawX (- yMin_global 0.5)) (list drawX (+ yMax_global 1.25)) "")
+        (command "_.CHPROP" (entlast) "" "Color" 1 "Ltype" "CENTER" "Ltscale" 0.3 "")
+        (setq axisXList (_append-unique-float axisXList drawX 1e-6))
+        (setq dimXList (_append-unique-float dimXList drawX 1e-6))
+      )
+    )
   )
   (setq axisXList (vl-sort axisXList '(lambda (a b) (< a b))))
   (setq dimXList (vl-sort dimXList '(lambda (a b) (< a b))))
@@ -1255,8 +1387,9 @@
           (progn
             (setq t_x1m (nth 1 tramo))
             (setq t_x2m (nth 2 tramo))
-            (setq x1 (+ xDrawStart t_x1m 0.15))
-            (setq x2 (+ xDrawStart t_x2m -0.15))
+            (setq i (vl-position tramo tramosOrdenados))
+            (setq x1 (+ (_tramo-step-left-x i) 0.15))
+            (setq x2 (- (_tramo-step-right-x i) 0.15))
             (if escalonIsTop
               (setq ySteelDeep (- (_tramo-yTop tramo) 0.15))
               (setq ySteelDeep (+ (_tramo-yBot tramo) 0.15))
@@ -1304,7 +1437,15 @@
   (while (setq line (read-line fp))
     (setq cleanLine (clean-string line))
     (if (wcmatch line "*LONGITUDINAL BAR DETAILS*") (setq isReadingSteel T savedDist nil))
-    (if (and isReadingSteel (wcmatch line "*LONGITUDINAL BAR LAYOUT*")) (setq isReadingSteel nil))
+    (if (and isReadingSteel (wcmatch line "*LONGITUDINAL BAR LAYOUT*"))
+      (progn
+        (if savedDist
+          (setq globalSteelList (append globalSteelList (list (list (+ xOffsetGlobal savedDist) astTop astBot))))
+        )
+        (setq savedDist nil)
+        (setq isReadingSteel nil)
+      )
+    )
 
     (if (wcmatch line "*Member *:*")
       (progn
@@ -1751,10 +1892,16 @@
               )
 
               (if (<= (abs (- segX1 startNodeX)) tol)
-                (setq x_baston_ini (min x_baston_ini (- startNodeX 0.25)))
+                (if (= startIdx 0)
+                  (setq x_baston_ini (min x_baston_ini (- startNodeX 0.45)))
+                  (setq x_baston_ini (min x_baston_ini (- startNodeX 0.25)))
+                )
               )
               (if (<= (abs (- segX2 endNodeX)) tol)
-                (setq x_baston_fin (max x_baston_fin (+ endNodeX 0.25)))
+                (if (= endIdx (1- (length tramosOrdenados)))
+                  (setq x_baston_fin (max x_baston_fin (+ endNodeX 0.45)))
+                  (setq x_baston_fin (max x_baston_fin (+ endNodeX 0.25)))
+                )
               )
 
               (setq x_baston_ini (+ x_baston_ini coverTrim))

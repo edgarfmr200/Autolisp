@@ -10,7 +10,7 @@
 (defun ocmema:beam:const-armar-from-anl (anlPath / *error* file dir filename tempFile wsh cmd fp line 
                             coordList YD ZB startX endX l_total_cm l_total_m h_cm b_cm 
                             h_draw rectLen ptOrigin xOrigin yOrigin oldOsnap p1 p2 
-                            idx numNodes hasAxis axisName posType drawX extraX supportNodes
+                            idx numNodes hasAxis axisName posType drawX extraX drawRed supportNodes
                             pAxisBot pAxisTop centerCircle axisXList dimXList axisCenter
                             dataMode strList valX nodeID
                             tokenList i len token currentDist xOffsetGlobal 
@@ -522,7 +522,13 @@
   (while (setq line (read-line fp))
     (setq cleanLine (clean-string line)) 
     (if (wcmatch line "*LONGITUDINAL BAR DETAILS*") (setq isReadingSteel T savedDist nil))
-    (if (and isReadingSteel (wcmatch line "*LONGITUDINAL BAR LAYOUT*")) (setq isReadingSteel nil))
+    (if (and isReadingSteel (wcmatch line "*LONGITUDINAL BAR LAYOUT*"))
+      (progn
+        (if savedDist (setq globalSteelList (append globalSteelList (list (list (+ xOffsetGlobal savedDist) astTop astBot)))))
+        (setq savedDist nil)
+        (setq isReadingSteel nil)
+      )
+    )
     (if (wcmatch line "*Member *:*") (progn (setq mIndex (1+ mIndex)) (setq savedDist nil) (if (and memberOffsetList (<= mIndex (length memberOffsetList))) (setq xOffsetGlobal (nth (1- mIndex) memberOffsetList)) (if (> (length globalSteelList) 0) (setq xOffsetGlobal (car (last globalSteelList))) (setq xOffsetGlobal 0.0)))))
     (if (and isReadingSteel (> (strlen cleanLine) 5) (not (wcmatch line "*Distance*")) (not (wcmatch line "*-----*")))
       (progn (setq tokenList (read (strcat "(" cleanLine ")")))
@@ -555,17 +561,62 @@
   (setq axisXList '()) (setq idx 0 numNodes (length coordList) dimXList '())
   (foreach node coordList
     (setq nID (car node) nX_m (/ (- (cadr node) startX) 100.0))
-    (setq hasAxis (or (= idx 0) (= idx (1- numNodes)) (member nID supportNodes))) (setq axisName (strcat "E-" (itoa (1+ idx)))) 
+    (setq axisName "")
+    (setq posType "Centrado")
+    (setq drawRed nil)
     (setq drawX 0.0 extraX nil)
-    (cond ((= idx 0) (setq drawX (+ (car p1) 0.5))) ((= idx (1- numNodes)) (setq drawX (+ (car p1) 0.5 nX_m))) (t (setq drawX (+ (car p1) 0.5 nX_m))))
+    (cond
+      ((or (= idx 0) (= idx (1- numNodes)))
+        (princ (strcat "\nNodo extremo " (itoa nID) "..."))
+        (initget "Si No")
+        (setq hasAxis (getkword " Eje? [Si/No] <Si>: "))
+        (if (null hasAxis) (setq hasAxis "Si"))
+        (initget "Orillado Centrado")
+        (setq posType (getkword " Pos? [Orillado/Centrado] <Centrado>: "))
+        (if (null posType) (setq posType "Centrado"))
+        (setq hasAxis (= hasAxis "Si"))
+        (setq drawRed T)
+        (if hasAxis
+          (progn
+            (setq axisName (getstring T " Nombre del eje: "))
+            (if (= axisName "") (setq axisName (itoa (1+ idx))))
+          )
+        )
+        (if (= idx 0)
+          (if (= posType "Orillado") (progn (setq drawX (+ (car p1) 0.0)) (setq extraX (+ (car p1) 0.5))) (setq drawX (+ (car p1) 0.5)))
+          (if (= posType "Orillado") (progn (setq drawX (+ (car p1) rectLen)) (setq extraX (+ (car p1) rectLen -0.5))) (setq drawX (+ (car p1) 0.5 nX_m)))
+        )
+      )
+      (T
+        (princ (strcat "\nNodo " (itoa nID) "..."))
+        (initget "Si No")
+        (setq hasAxis (getkword " Eje? [Si/No] <No>: "))
+        (if (null hasAxis) (setq hasAxis "No"))
+        (setq hasAxis (= hasAxis "Si"))
+        (if hasAxis
+          (progn
+            (setq drawRed T)
+            (setq axisName (getstring T " Nombre del eje: "))
+            (if (= axisName "") (setq axisName (itoa (1+ idx))))
+          )
+          (progn
+            (initget "Si No")
+            (setq drawRed (getkword " Dibujar linea roja? [Si/No] <No>: "))
+            (if (null drawRed) (setq drawRed "No"))
+            (setq drawRed (= drawRed "Si"))
+          )
+        )
+        (setq drawX (+ (car p1) 0.5 nX_m))
+      )
+    )
     (setq axisCenter (+ (car p1) 0.5 nX_m))
-    (if hasAxis
+    (if drawRed
       (progn
         (setq axisXList (append axisXList (list axisCenter))) (setq dimXList (append dimXList (list axisCenter)))
         (setq pAxisBot (list drawX (- yOrigin 0.5)) pAxisTop (list drawX (+ yOrigin h_draw 1.25)))
         (command "_.LINE" pAxisBot pAxisTop "") (command "_.CHPROP" (entlast) "" "Color" 1 "Ltype" "CENTER" "Ltscale" 0.3 "")
         (if extraX (progn (command "_.LINE" (list extraX (- yOrigin 0.5)) (list extraX (+ yOrigin h_draw 1.25)) "") (command "_.CHPROP" (entlast) "" "Color" 1 "Ltype" "CENTER" "Ltscale" 0.3 "")))
-        (setq centerCircle (list drawX (+ (cadr pAxisTop) 0.275))) (command "_.CIRCLE" centerCircle 0.275) (command "_.CHPROP" (entlast) "" "Color" 7 "") (command "_.TEXT" "_MC" centerCircle 0.22 0 (itoa (1+ idx))) (command "_.CHPROP" (entlast) "" "Color" 4 "")
+        (if hasAxis (progn (setq centerCircle (list drawX (+ (cadr pAxisTop) 0.275))) (command "_.CIRCLE" centerCircle 0.275) (command "_.CHPROP" (entlast) "" "Color" 7 "") (command "_.TEXT" "_MC" centerCircle 0.22 0 axisName) (command "_.CHPROP" (entlast) "" "Color" 4 "")))
       )
     )
     (setq idx (1+ idx))
