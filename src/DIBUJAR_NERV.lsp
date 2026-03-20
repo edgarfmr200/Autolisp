@@ -916,6 +916,7 @@
   (princ "\n--- ACERO SUPERIOR ---")
   (setq yTop (+ yOrigin h_draw -0.15))
   (setq yDimSup (+ yTop 0.25))  ;; <-- AQUÍ: cota 0.25 arriba de la cara superior
+  (setq yDimSup (+ yOrigin h_draw 0.40))
   (setq areaBaseTop 71.0)
 
   (setq zonesTop (procesar-zonas-v27 globalSteelList 71.0 (car p1) T))
@@ -982,10 +983,10 @@
            (command "_.PLINE" p_join p_crank p_tail "")
            (command "_.CHPROP" (entlast) "" "Color" 5 "")
 
-           ;; Cota horizontal: (axisX,yTop) -> (x_end,yTop), ubicada en yTop+0.25
+           ;; Cota horizontal sobre borde superior real
            (command "_.DIMLINEAR"
-                    (list axisX yTop)
-                    (list (car p_join) yTop)
+                    (list axisX (+ yOrigin h_draw))
+                    (list (car p_join) (+ yOrigin h_draw))
                     (list (/ (+ axisX (car p_join)) 2.0) yDimSup))
         )
 
@@ -1003,8 +1004,8 @@
 
            ;; Cota horizontal: (x_start,yTop) -> (axisX,yTop)
            (command "_.DIMLINEAR"
-                    (list (car p_join) yTop)
-                    (list axisX yTop)
+                    (list (car p_join) (+ yOrigin h_draw))
+                    (list axisX (+ yOrigin h_draw))
                     (list (/ (+ (car p_join) axisX) 2.0) yDimSup))
         )
 
@@ -1021,14 +1022,14 @@
 
            ;; IZQ: (x_start,yTop) -> (axisX,yTop)
            (command "_.DIMLINEAR"
-                    (list (car p_join_izq) yTop)
-                    (list axisX yTop)
+                    (list (car p_join_izq) (+ yOrigin h_draw))
+                    (list axisX (+ yOrigin h_draw))
                     (list (/ (+ (car p_join_izq) axisX) 2.0) yDimSup))
 
            ;; DER: (axisX,yTop) -> (x_end,yTop)
            (command "_.DIMLINEAR"
-                    (list axisX yTop)
-                    (list (car p_join_der) yTop)
+                    (list axisX (+ yOrigin h_draw))
+                    (list (car p_join_der) (+ yOrigin h_draw))
                     (list (/ (+ axisX (car p_join_der)) 2.0) yDimSup))
         )
      )

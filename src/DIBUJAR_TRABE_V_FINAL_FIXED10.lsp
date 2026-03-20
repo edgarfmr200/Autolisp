@@ -180,7 +180,7 @@
   (defun ocmema--rtos-safe (v) (rtos (ocmema--num-safe v) 2 3))
   
   (defun ocmema--dimY (side yMin_env yMax_env / dimOff)
-    (setq dimOff 0.35)
+    (setq dimOff 0.40)
     (if (= (strcase side) "TOP")
       (+ yMax_env dimOff)
       (- yMin_env dimOff)

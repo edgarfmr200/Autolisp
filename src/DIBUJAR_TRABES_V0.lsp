@@ -1228,13 +1228,13 @@
                 (if (> distL 0.0)
                   (progn
                     (setq axis_near_start (get-closest-axis x_real_L axisXList))
-                    (if axis_near_start (command "_.DIMLINEAR" (list axis_near_start yOrigin) (list x_real_L yOrigin) (list (/ (+ axis_near_start x_real_L) 2.0) (+ yTop 0.4))))
+                    (if axis_near_start (command "_.DIMLINEAR" (list axis_near_start (+ yOrigin h_draw)) (list x_real_L (+ yOrigin h_draw)) (list (/ (+ axis_near_start x_real_L) 2.0) (+ yOrigin h_draw 0.4))))
                   )
                 )
                 (if (< distR l_total_cm)
                   (progn
                     (setq axis_near_end (get-closest-axis x_real_R axisXList))
-                    (if axis_near_end (command "_.DIMLINEAR" (list x_real_R yOrigin) (list axis_near_end yOrigin) (list (/ (+ x_real_R axis_near_end) 2.0) (+ yTop 0.4))))
+                    (if axis_near_end (command "_.DIMLINEAR" (list x_real_R (+ yOrigin h_draw)) (list axis_near_end (+ yOrigin h_draw)) (list (/ (+ x_real_R axis_near_end) 2.0) (+ yOrigin h_draw 0.4))))
                   )
                 )
                 (setq maxReq 0.0)
