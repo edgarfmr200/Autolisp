@@ -183,6 +183,133 @@
   sc
 )
 
+(defun ocmema:proj-draw-config-path (proj / path)
+  (setq path (or (ocm-get proj "project_path") ocmema:*project-path*))
+  (cond
+    ((= (type path) 'STR)
+     (if (findfile path) path nil)
+    )
+    ((and (= (type ocmema:*project-path*) 'STR) (findfile ocmema:*project-path*))
+     ocmema:*project-path*
+    )
+    (T nil)
+  )
+)
+
+(defun ocmema:draw-units-normalize (raw / u)
+  (cond
+    ((= (type raw) 'STR) (setq u (strcase (ocmema:str-trim raw))))
+    ((= (type raw) 'SYM) (setq u (strcase (vl-symbol-name raw))))
+    (T (setq u nil))
+  )
+  (cond
+    ((member u '("M" "CM" "C" "MM")) u)
+    (T nil)
+  )
+)
+
+(defun ocmema:draw-scale-normalize (raw / sc)
+  (cond
+    ((numberp raw) (setq sc raw))
+    ((= (type raw) 'STR) (setq sc (ocmema:pio-to-number raw)))
+    (T (setq sc nil))
+  )
+  (if (and (numberp sc) (> sc 0.0))
+    sc
+    nil
+  )
+)
+
+(defun ocmema:get-draw-scale (proj / sc cfg path)
+  (setq path (ocmema:proj-draw-config-path proj))
+  (setq cfg (ocmema:proj-read-draw-config-from-path path))
+  (setq sc (if cfg (ocmema:draw-scale-normalize (cadr cfg)) nil))
+  (if (not sc)
+    (setq sc
+      (or
+        (ocmema:draw-scale-normalize (ocmema:pio-assoc-get "draw_scale_factor" proj))
+        (ocmema:draw-scale-normalize (ocmema:pio-assoc-get 'draw_scale_factor proj))
+        (ocmema:draw-scale-normalize (ocmema:pio-assoc-get "DRAW_SCALE" proj))
+        (ocmema:draw-scale-normalize (ocmema:pio-assoc-get 'DRAW_SCALE proj))
+        (ocmema:draw-scale-normalize (ocmema:pio-assoc-get "scale" proj))
+        (ocmema:draw-scale-normalize (ocmema:pio-assoc-get 'scale proj))
+        (ocmema:draw-scale-normalize (ocmema:pio-assoc-get "SCALE" proj))
+        (ocmema:draw-scale-normalize (ocmema:pio-assoc-get 'SCALE proj))
+      )
+    )
+  )
+  (if sc sc 1.0)
+)
+
+(defun ocmema:get-draw-units (proj / u cfg path)
+  (setq path (ocmema:proj-draw-config-path proj))
+  (setq cfg (ocmema:proj-read-draw-config-from-path path))
+  (setq u (if cfg (ocmema:draw-units-normalize (car cfg)) nil))
+  (if (not u)
+    (setq u
+      (or
+        (ocmema:draw-units-normalize (ocmema:pio-assoc-get "draw_units" proj))
+        (ocmema:draw-units-normalize (ocmema:pio-assoc-get 'draw_units proj))
+        (ocmema:draw-units-normalize (ocmema:pio-assoc-get "DRAW_UNITS" proj))
+        (ocmema:draw-units-normalize (ocmema:pio-assoc-get 'DRAW_UNITS proj))
+        (ocmema:draw-units-normalize (ocmema:pio-assoc-get "units" proj))
+        (ocmema:draw-units-normalize (ocmema:pio-assoc-get 'units proj))
+        (ocmema:draw-units-normalize (ocmema:pio-assoc-get "UNITS" proj))
+        (ocmema:draw-units-normalize (ocmema:pio-assoc-get 'UNITS proj))
+      )
+    )
+  )
+  (if u u "CM")
+)
+
+(defun ocmema:call-with-osmode-off (fn args / oldos r)
+  (setq oldos (getvar "OSMODE"))
+  (setvar "OSMODE" 0)
+  (setq r (vl-catch-all-apply fn args))
+  (setvar "OSMODE" oldos)
+  r
+)
+
+(defun ocmema:proj-read-draw-config-from-path (path / lines line kv key val units scale in-units)
+  (if (and path (findfile path))
+    (progn
+      (setq lines (ocmema:pio-read-lines path))
+      (if lines
+        (progn
+          (setq units nil)
+          (setq scale nil)
+          (setq in-units nil)
+          (foreach line lines
+            (setq line (ocmema:str-trim line))
+            (cond
+              ((= (strcase line) "[UNITS]") (setq in-units T))
+              ((= (strcase line) "[/UNITS]") (setq in-units nil))
+              (T
+               (setq kv (ocmema:pio-split-kv line))
+               (if kv
+                 (progn
+                   (setq key (strcase (car kv)))
+                   (setq val (cadr kv))
+                   (cond
+                     ((= key "DRAW_UNITS") (setq units val))
+                     ((= key "DRAW_SCALE") (setq scale (ocmema:pio-to-number val)))
+                     ((and in-units (= key "UNITS") (not units)) (setq units val))
+                     ((and in-units (= key "SCALE") (not scale)) (setq scale (ocmema:pio-to-number val)))
+                   )
+                 )
+               )
+              )
+            )
+          )
+          (list units scale)
+        )
+        nil
+      )
+    )
+    nil
+  )
+)
+
 (defun ocm-k->sym (k / s r)
   (cond
     ((= (type k) 'SYM) k)
@@ -297,8 +424,10 @@
   (strcase s)
 )
 
-(defun ocmema:pl-safe-apply (step fn args / r)
+(defun ocmema:pl-safe-apply (step fn args / r oldos)
+  (setq oldos (getvar "OSMODE"))
   (setq r (vl-catch-all-apply fn args))
+  (setvar "OSMODE" oldos)
   (if (vl-catch-all-error-p r)
     (progn
       (ocmema:proj-log (strcat "Error en " step ": " (vl-catch-all-error-message r)))
@@ -687,28 +816,47 @@
   out
 )
 
-(defun ocmema:anl-extract-widths-cm (path / lines line num widths tokens idx tok)
+(defun ocmema:anl-extract-widths-cm (path / lines line num widths tokens idx tok in-props zlist zval)
   (setq widths '())
   (setq *ocm_anl_reason* nil)
   (setq *ocm_anl_sample* nil)
   (if (and path (/= path "") (setq lines (ocmema:pio-read-lines path)))
     (foreach line lines
-      (setq tokens (ocmema:pio-split-list line " "))
-      (setq idx 0)
-      (while (< idx (length tokens))
-        (setq tok (strcase (nth idx tokens)))
-        (if (or (= tok "ZD") (= tok "ZB"))
-          (progn
-            (setq num (ocmema:pio-to-number (nth (1+ idx) tokens)))
-            (if num
-              (progn
-                (setq *ocm_anl_sample* line)
-                (setq widths (append widths (list num)))
-              )
-            )
-          )
+      (setq line (if line (vl-string-trim " \t" line) ""))
+      (cond
+        ((wcmatch (strcase line) "*MEMBER PROPERTY*")
+         (setq in-props T)
         )
-        (setq idx (1+ idx))
+        ((and in-props
+              (or (wcmatch (strcase line) "*DEFINE MATERIAL*")
+                  (wcmatch (strcase line) "*CONSTANTS*")
+                  (wcmatch (strcase line) "*SUPPORTS*")
+                  (wcmatch (strcase line) "*START CONCRETE DESIGN*")))
+         (setq in-props nil)
+        )
+        ((and in-props (> (strlen line) 0) (wcmatch (strcase line) "*PRIS*"))
+         (setq tokens (ocmema:pio-split-list line " "))
+         (setq idx 0)
+         (setq zlist '())
+         (while (< idx (length tokens))
+           (setq tok (strcase (nth idx tokens)))
+           (if (or (= tok "ZD") (= tok "ZB"))
+             (progn
+               (setq zval (ocmema:pio-to-number (nth (1+ idx) tokens)))
+               (if zval
+                 (setq zlist (append zlist (list zval)))
+               )
+             )
+           )
+           (setq idx (1+ idx))
+         )
+         (if zlist
+           (progn
+             (setq *ocm_anl_sample* line)
+             (setq widths (append widths (list (apply 'max zlist))))
+           )
+         )
+        )
       )
     )
   )
@@ -895,44 +1043,27 @@
   )
 )
 
-(defun ocmema:safe-leader (p1 p2 p3 / oldblk before e ent r)
-  (setq oldblk (getvar "DIMBLK"))
-  (setq before (entlast))
-  (setvar "DIMBLK" "_CLOSED")
-  (setq r (vl-catch-all-apply
-    '(lambda ()
-       (vl-cmdf "_.LEADER" p1 p2 p3 "")
-       (vl-cmdf "O")
-       (vl-cmdf "N")
-       (vl-cmdf "")
-     )
-  ))
-  (while (> (getvar "CMDACTIVE") 0) (vl-cmdf ""))
-  (setvar "DIMBLK" oldblk)
-  (if (vl-catch-all-error-p r)
-    (progn
-      (ocmema:proj-warn (strcat "OCMEMA WARN: leader omitido (" (vl-catch-all-error-message r) ")"))
-      nil
-    )
-    (progn
-      (setq ent nil)
-      (setq e (if before (entnext before) (entnext)))
-      (while e
-        (if (= (cdr (assoc 0 (entget e))) "LEADER") (setq ent e))
-        (setq e (entnext e))
-      )
-      (if ent
-        (progn
-          (ocmema:safe-entmod ent (list (cons 8 "TRABES") (cons 62 7)))
-          ent
-        )
-        nil
+(defun ocmema:safe-leader (p1 p2 p3 / ent)
+  (setq ent
+    (ocmema:safe-entmakex
+      (list
+        (cons 0 "LWPOLYLINE")
+        (cons 100 "AcDbEntity")
+        (cons 8 "TRABES")
+        (cons 62 7)
+        (cons 100 "AcDbPolyline")
+        (cons 90 3)
+        (cons 70 0)
+        (cons 10 (ocmema:pt2d p1))
+        (cons 10 (ocmema:pt2d p2))
+        (cons 10 (ocmema:pt2d p3))
       )
     )
   )
+  ent
 )
 
-(defun ocmema:pl-center-midpoint (ent / dxf typ p0 p1 pts)
+(defun ocmema:pl-center-endpoints (ent / dxf typ p0 p1 pts)
   (if (and ent (= (type ent) 'ENAME))
     (progn
       (setq dxf (entget ent))
@@ -955,26 +1086,138 @@
          )
         )
       )
-      (if (and p0 p1)
-        (list (/ (+ (car p0) (car p1)) 2.0) (/ (+ (cadr p0) (cadr p1)) 2.0))
-        nil
-      )
+      (if (and p0 p1) (list p0 p1) nil)
     )
     nil
   )
 )
 
-(defun ocmema:safe-label (beamName centerEnt / before mid p1 p2 p3 ptText lead txt ok ent typ e)
-  (setq ok "FAIL")
-  (setq mid (ocmema:pl-center-midpoint centerEnt))
-  (if mid
+(defun ocmema:pl-center-midpoint (ent / ends)
+  (setq ends (ocmema:pl-center-endpoints ent))
+  (if ends
+    (list
+      (/ (+ (car (car ends)) (car (cadr ends))) 2.0)
+      (/ (+ (cadr (car ends)) (cadr (cadr ends))) 2.0)
+    )
+    nil
+  )
+)
+
+(defun ocmema:pl-entity-vertices (ent / dxf typ pts p0 p1)
+  (if (and ent (= (type ent) 'ENAME))
     (progn
-      (setq before (entlast))
-      (setq p1 mid)
-      (setq p2 (list (+ (car p1) 0.4) (+ (cadr p1) 0.65)))
-      (setq p3 (list (+ (car p2) 0.18) (cadr p2)))
+      (setq dxf (entget ent))
+      (setq typ (cdr (assoc 0 dxf)))
+      (setq pts '())
+      (cond
+        ((= typ "LINE")
+         (setq p0 (cdr (assoc 10 dxf)))
+         (setq p1 (cdr (assoc 11 dxf)))
+         (if (and p0 p1)
+           (setq pts (list p0 p1))
+         )
+        )
+        ((= typ "LWPOLYLINE")
+         (foreach p dxf
+           (if (= (car p) 10)
+             (setq pts (append pts (list (cdr p))))
+           )
+         )
+        )
+      )
+      pts
+    )
+    nil
+  )
+)
+
+(defun ocmema:pl-bbox (pts / minx miny maxx maxy p)
+  (if pts
+    (progn
+      (setq minx (car (car pts)))
+      (setq maxx minx)
+      (setq miny (cadr (car pts)))
+      (setq maxy miny)
+      (foreach p (cdr pts)
+        (if (< (car p) minx) (setq minx (car p)))
+        (if (> (car p) maxx) (setq maxx (car p)))
+        (if (< (cadr p) miny) (setq miny (cadr p)))
+        (if (> (cadr p) maxy) (setq maxy (cadr p)))
+      )
+      (list minx miny maxx maxy)
+    )
+    nil
+  )
+)
+
+(defun ocmema:pl-label-geometry (boundaryEnt centerEnt / ends bpts bbox p1 p2 p3 ptText dx dy minx miny maxx maxy)
+  (setq ends (ocmema:pl-center-endpoints centerEnt))
+  (setq bpts (ocmema:pl-entity-vertices boundaryEnt))
+  (setq bbox (ocmema:pl-bbox bpts))
+  (if (and ends bbox)
+    (progn
+      (setq minx (nth 0 bbox))
+      (setq miny (nth 1 bbox))
+      (setq maxx (nth 2 bbox))
+      (setq maxy (nth 3 bbox))
+      (setq dx (abs (- (car (cadr ends)) (car (car ends)))))
+      (setq dy (abs (- (cadr (cadr ends)) (cadr (car ends)))))
+      (if (>= dx dy)
+        (progn
+          (setq p1 (list (/ (+ minx maxx) 2.0) maxy))
+          (setq p2 (list (+ (car p1) 0.30) (+ (cadr p1) 0.50)))
+          (setq p3 (list (+ (car p1) 0.45) (+ (cadr p1) 0.50)))
+          (setq ptText (list (+ (car p3) 0.15) (cadr p3)))
+        )
+        (progn
+          (setq p1 (list maxx (/ (+ miny maxy) 2.0)))
+          (setq p2 (list (+ (car p1) 0.50) (+ (cadr p1) 0.30)))
+          (setq p3 (list (+ (car p1) 0.50) (+ (cadr p1) 0.45)))
+          (setq ptText (list (+ (car p3) 0.15) (cadr p3)))
+        )
+      )
+      (list p1 p2 p3 ptText)
+    )
+    nil
+  )
+)
+
+(defun ocmema:safe-arrowhead (p1 p2 / dir perp tip base mid b1 b2 ent)
+  (setq tip (ocmema:pt2d p1))
+  (setq dir (ocm-vec-unit (ocm-vec-sub (ocmema:pt2d p2) tip)))
+  (setq perp (list (- (cadr dir)) (car dir)))
+  (setq mid (ocm-vec-add tip (ocm-vec-scale dir 0.18)))
+  (setq b1 (ocm-vec-add mid (ocm-vec-scale perp 0.03)))
+  (setq b2 (ocm-vec-sub mid (ocm-vec-scale perp 0.03)))
+  (setq ent
+    (ocmema:safe-entmakex
+      (list
+        (cons 0 "SOLID")
+        (cons 100 "AcDbEntity")
+        (cons 8 "TRABES")
+        (cons 62 7)
+        (cons 100 "AcDbTrace")
+        (cons 10 tip)
+        (cons 11 (ocmema:pt2d b1))
+        (cons 12 (ocmema:pt2d b2))
+        (cons 13 (ocmema:pt2d b2))
+      )
+    )
+  )
+  ent
+)
+
+(defun ocmema:safe-label (beamName boundaryEnt centerEnt / geom p1 p2 p3 ptText lead txt ok arrow)
+  (setq ok "FAIL")
+  (setq geom (ocmema:pl-label-geometry boundaryEnt centerEnt))
+  (if geom
+    (progn
+      (setq p1 (nth 0 geom))
+      (setq p2 (nth 1 geom))
+      (setq p3 (nth 2 geom))
       (setq lead (ocmema:safe-leader p1 p2 p3))
-      (setq ptText (polar p3 0.0 0.05))
+      (setq arrow (ocmema:safe-arrowhead p1 p2))
+      (setq ptText (nth 3 geom))
       (setq txt (ocmema:safe-entmakex
         (list
           (cons 0 "TEXT")
@@ -992,17 +1235,7 @@
           (cons 7 (getvar "TEXTSTYLE"))
         )
       ))
-      (if txt (setq ok "OK"))
-
-      (setq e (if before (entnext before) (entnext)))
-      (while e
-        (setq typ (cdr (assoc 0 (entget e))))
-        (if (and (member typ (list "SOLID" "LWPOLYLINE" "POLYLINE" "MTEXT"))
-                 (not (eq e lead)))
-          (entdel e)
-        )
-        (setq e (entnext e))
-      )
+      (if (and txt lead arrow) (setq ok "OK"))
     )
     (ocmema:proj-warn "OCMEMA WARN: etiqueta omitida (centerline insuficiente)")
   )
@@ -1019,6 +1252,7 @@
        (setq hatch (vla-AddHatch ms 0 "AR-CONC" :vlax-true))
        (vla-put-PatternScale hatch 0.003)
        (vla-put-Color hatch 8)
+       (vla-put-Layer hatch "TRABE-PROY")
        (setq loops (vlax-make-safearray vlax-vbObject '(0 . 0)))
        (vlax-safearray-put-element loops 0 obj)
        (vla-AppendOuterLoop hatch loops)
@@ -1054,7 +1288,10 @@
         (progn
           (setq cur (entlast))
           (if (and cur (not (eq cur prev)) (= (cdr (assoc 0 (entget cur))) "HATCH"))
-            "OK"
+            (progn
+              (ocmema:safe-entmod cur (list (cons 8 "TRABE-PROY") (cons 62 8)))
+              "OK"
+            )
             (progn
               (ocmema:proj-warn "OCMEMA WARN: hatch omitido (incompatible)")
               nil
@@ -1085,7 +1322,7 @@
         (ocmema:safe-entmod centerEnt (list (cons 8 "TRABES") (cons 48 0.5) (cons 43 0.08) (cons 40 0.08) (cons 41 0.08)))
         (ocmema:safe-entmod centerEnt (list (cons 8 "TRABES") (cons 48 0.5)))
       )
-      (setq labelOk (ocmema:safe-label beamName centerEnt))
+      (setq labelOk (ocmema:safe-label beamName boundaryEnt centerEnt))
     )
     (ocmema:proj-warn "OCMEMA WARN: centerline nil; etiqueta omitida")
   )
@@ -1097,7 +1334,11 @@
 )
 
 (defun ocmema:pl-units-factor (units / u)
-  (setq u (strcase (if units units "")))
+  (cond
+    ((= (type units) 'STR) (setq u (strcase units)))
+    ((= (type units) 'SYM) (setq u (strcase (vl-symbol-name units))))
+    (T (setq u ""))
+  )
   (cond
     ((= u "M") 0.01)
     ((= u "MM") 10.0)
@@ -1105,18 +1346,18 @@
   )
 )
 
-(defun ocmema:cm->draw (cm scale / m sc)
+(defun ocmema:cm->draw (cm units scale / sc f)
   (setq sc scale)
   (if (or (not sc) (= sc 0.0)) (setq sc 1.0))
-  (setq m (/ cm 100.0))
-  (/ m sc)
+  (setq f (ocmema:pl-units-factor units))
+  (* cm f sc)
 )
 
 (defun ocmema:pl-widths-cm->draw (widths units scale / out w)
   (setq out '())
   (foreach w widths
     (if (numberp w)
-      (setq out (append out (list (ocmema:cm->draw w scale))))
+      (setq out (append out (list (ocmema:cm->draw w units scale))))
     )
   )
   out
@@ -1124,14 +1365,14 @@
 
 (defun ocmema:pl-cm-to-draw (cm units scale /)
   (if (numberp cm)
-    (ocmema:cm->draw cm scale)
+    (ocmema:cm->draw cm units scale)
     0.0
   )
 )
 
 (defun ocmema:pl-wall-ext-draw (wall_cm units scale / ext_cm)
   (setq ext_cm (/ wall_cm 2.0))
-  (ocmema:cm->draw ext_cm scale)
+  (ocmema:cm->draw ext_cm units scale)
 )
 
 (defun ocmema:pl-get-extents (mode wall_cm units scale / ext_ini ext_fin)
@@ -1157,6 +1398,206 @@
   (list
     (ocm-vec-sub p0 (ocm-vec-scale d ext0))
     (ocm-vec-add p1 (ocm-vec-scale d ext1))
+  )
+)
+
+(defun ocmema:pl-spec-width-pair-cm (spec / tokens idx tok zvals zval)
+  (setq zvals '())
+  (setq tokens (ocmema:pio-split-list (if spec spec "") " "))
+  (setq idx 0)
+  (while (< idx (length tokens))
+    (setq tok (strcase (nth idx tokens)))
+    (if (and (member tok '("ZD" "ZB")) (< (1+ idx) (length tokens)))
+      (progn
+        (setq zval (ocmema:pio-to-number (nth (1+ idx) tokens)))
+        (if (numberp zval)
+          (setq zvals (append zvals (list zval)))
+        )
+      )
+    )
+    (setq idx (1+ idx))
+  )
+  (if zvals
+    (list (apply 'max zvals) (apply 'min zvals))
+    nil
+  )
+)
+
+(defun ocmema:pl-point-distances-cm (points units scale / out prev pt acc factor sc)
+  (setq out (list 0.0))
+  (setq acc 0.0)
+  (setq prev (car points))
+  (setq factor (ocmema:proj-unit-factor units))
+  (setq sc (if (and (numberp scale) (> scale 0.0)) scale 1.0))
+  (foreach pt (cdr points)
+    (setq acc (+ acc (/ (* (distance prev pt) factor) sc)))
+    (setq out (append out (list acc)))
+    (setq prev pt)
+  )
+  out
+)
+
+(defun ocmema:pl-anl-width-profiles-cm (path points units scale / geom nodes members props ordered pair mdata n1 n2 node1 node2 x1 x2 pinfo spec widths point-dists out-outer out-inner i s e mid overlapped item picked)
+  (setq out-outer '())
+  (setq out-inner '())
+  (setq geom (ocmema:anl-parse-geometry path))
+  (setq nodes (ocmema:pio-assoc-get "nodes" geom))
+  (setq members (ocmema:pio-assoc-get "members" geom))
+  (setq props (ocmema:pio-assoc-get "props" geom))
+  (setq ordered '())
+  (foreach pair members
+    (setq mdata (cdr pair))
+    (if (and (listp mdata) (>= (length mdata) 2))
+      (progn
+        (setq n1 (car mdata))
+        (setq n2 (cadr mdata))
+        (setq node1 (ocmema:model3d-safe-assoc n1 nodes))
+        (setq node2 (ocmema:model3d-safe-assoc n2 nodes))
+        (setq x1 (if node1 (car (cdr node1)) nil))
+        (setq x2 (if node2 (car (cdr node2)) nil))
+        (setq pinfo (cdr (ocmema:model3d-safe-assoc (car pair) props)))
+        (setq spec (if pinfo (ocmema:pio-assoc-get "spec" pinfo) nil))
+        (setq widths (ocmema:pl-spec-width-pair-cm spec))
+        (if (and (numberp x1) (numberp x2) widths)
+          (setq ordered
+            (append ordered
+              (list (list (min x1 x2) (max x1 x2) (car widths) (cadr widths))))
+          )
+        )
+      )
+    )
+  )
+  (setq ordered (vl-sort ordered '(lambda (a b) (< (car a) (car b)))))
+  (setq point-dists (ocmema:pl-point-distances-cm points units scale))
+  (setq i 0)
+  (while (< i (1- (length point-dists)))
+    (setq s (nth i point-dists))
+    (setq e (nth (1+ i) point-dists))
+    (setq mid (/ (+ s e) 2.0))
+    (setq overlapped '())
+    (setq picked nil)
+    (foreach item ordered
+      (if (and (<= (car item) mid) (>= (cadr item) mid))
+        (setq picked item)
+      )
+      (if (and (< (car item) e) (> (cadr item) s))
+        (setq overlapped (append overlapped (list item)))
+      )
+    )
+    (if picked
+      (progn
+        (setq out-outer (append out-outer (list (nth 2 picked))))
+        (setq out-inner (append out-inner (list (nth 3 picked))))
+      )
+      (if overlapped
+        (progn
+          (setq out-outer (append out-outer (list (apply 'max (mapcar 'caddr overlapped)))))
+          (setq out-inner (append out-inner (list (apply 'min (mapcar '(lambda (x) (nth 3 x)) overlapped)))))
+        )
+      )
+    )
+    (setq i (1+ i))
+  )
+  (if (and out-outer out-inner
+           (= (length out-outer) (1- (length points)))
+           (= (length out-inner) (1- (length points))))
+    (list (cons "outer" out-outer) (cons "inner" out-inner))
+    nil
+  )
+)
+
+(defun ocmema:pl-all-equal-p (lst / first ok item)
+  (setq ok T)
+  (if lst
+    (progn
+      (setq first (car lst))
+      (foreach item (cdr lst)
+        (if (not (equal item first 1e-6))
+          (setq ok nil)
+        )
+      )
+    )
+  )
+  ok
+)
+
+(defun ocmema:pl-build-contour-from-center (center widths_draw ext_ini ext_fin / p0 pN dir n wi edge1 edge2 rect w_used w_list side_plus side_minus i pA0 pA1 pB0 pB1 prevA0 prevA1 prevB0 prevB1 ipA ipB normal_right)
+  (if (or (not center) (< (length center) 2) (not widths_draw))
+    nil
+    (progn
+      (setq p0 (car center))
+      (setq pN (nth (1- (length center)) center))
+      (setq dir (ocm-vec-unit (ocm-vec-sub pN p0)))
+      (if (or (= (length widths_draw) 1) (ocmema:pl-all-equal-p widths_draw))
+        (progn
+          (setq w_used (car widths_draw))
+          (setq normal_right (list (cadr dir) (- (car dir))))
+          (setq edge1 (mapcar '(lambda (pt) (ocm-vec-sub pt (ocm-vec-scale normal_right (/ w_used 2.0)))) center))
+          (setq edge2 (mapcar '(lambda (pt) (ocm-vec-add pt (ocm-vec-scale normal_right (/ w_used 2.0)))) center))
+          (setq edge1 (ocmema:pl-extend-ends-dir edge1 dir ext_ini ext_fin))
+          (setq edge2 (ocmema:pl-extend-ends-dir edge2 dir ext_ini ext_fin))
+          (setq rect (append edge1 (reverse edge2)))
+        )
+        (progn
+          (setq n (1- (length center)))
+          (setq w_list widths_draw)
+          (setq side_plus '())
+          (setq side_minus '())
+          (setq i 0)
+          (while (< i n)
+            (setq wi (nth i w_list))
+            (setq pA0 (nth i center))
+            (setq pA1 (nth (1+ i) center))
+            (setq dir (ocm-vec-unit (ocm-vec-sub pA1 pA0)))
+            (setq normal_right (list (cadr dir) (- (car dir))))
+            (setq pB0 (ocm-vec-add pA0 (ocm-vec-scale normal_right (/ wi 2.0))))
+            (setq pB1 (ocm-vec-add pA1 (ocm-vec-scale normal_right (/ wi 2.0))))
+            (setq pA0 (ocm-vec-sub pA0 (ocm-vec-scale normal_right (/ wi 2.0))))
+            (setq pA1 (ocm-vec-sub pA1 (ocm-vec-scale normal_right (/ wi 2.0))))
+            (if (= i 0)
+              (progn
+                (setq side_plus (append side_plus (list pB0)))
+                (setq side_minus (append side_minus (list pA0)))
+              )
+              (progn
+                (setq ipA (inters prevB0 prevB1 pB0 pB1 nil))
+                (setq ipB (inters prevA0 prevA1 pA0 pA1 nil))
+                (setq side_plus (append side_plus (list (if ipA ipA prevB1))))
+                (setq side_minus (append side_minus (list (if ipB ipB prevA1))))
+              )
+            )
+            (setq prevB0 pB0)
+            (setq prevB1 pB1)
+            (setq prevA0 pA0)
+            (setq prevA1 pA1)
+            (setq i (1+ i))
+          )
+          (setq side_plus (append side_plus (list prevB1)))
+          (setq side_minus (append side_minus (list prevA1)))
+          (setq side_plus (ocmema:pl-extend-ends-dir side_plus (ocm-vec-unit (ocm-vec-sub pN p0)) ext_ini ext_fin))
+          (setq side_minus (ocmema:pl-extend-ends-dir side_minus (ocm-vec-unit (ocm-vec-sub pN p0)) ext_ini ext_fin))
+          (setq rect (append side_plus (reverse side_minus)))
+        )
+      )
+      rect
+    )
+  )
+)
+
+(defun ocmema:pl-draw-secondary-contours (center outer_draw inner_draw ext_ini ext_fin / idx widths pts contour)
+  (setq idx 0)
+  (while (< idx (length inner_draw))
+    (if (< (nth idx inner_draw) (nth idx outer_draw))
+      (progn
+        (setq widths (list (nth idx inner_draw)))
+        (setq pts (list (nth idx center) (nth (1+ idx) center)))
+        (setq contour (ocmema:pl-build-contour-from-center pts widths ext_ini ext_fin))
+        (if contour
+          (ocmema:draw-lwpoly contour T ocmema:*pl-outline-layer* ocmema:*pl-beam-color*)
+        )
+      )
+    )
+    (setq idx (1+ idx))
   )
 )
 
@@ -4436,7 +4877,7 @@
   found
 )
 
-(defun ocmema:pl-draw-beam (beam widths_cm anlPath ext_mode ext_ini ext_fin / name align kv points pnorm keys units scale wall_cm widths_draw w_used base center edge1 edge2 rect dir normal_left normal_right ext_cm ext_draw offset_draw p0 pN nPts mode align_note w_list
+(defun ocmema:pl-draw-beam (beam widths_cm anlPath ext_mode ext_ini ext_fin / name align kv points pnorm keys units scale wall_cm widths_profile outer_widths_cm inner_widths_cm widths_draw inner_draw w_used base center edge1 edge2 rect dir normal_left normal_right ext_cm ext_draw offset_draw p0 pN nPts mode align_note w_list
                               rectEnt centerEnt fmt labelOk hatchOk r
                               i n wi pA0 pA1 pB0 pB1 prevA0 prevA1 prevB0 prevB1 ipA ipB side_plus side_minus)
   (setq name (ocm-get beam "name"))
@@ -4444,8 +4885,8 @@
   (setq kv (ocm-assoc-get "points_raw" beam))
   (setq points (if kv (cdr kv) nil))
   (setq pnorm (ocmema:pl-normalize-points points))
-  (setq units (ocmema:pio-assoc-get "units" ocmema:*project*))
-  (setq scale (ocmema:get-scale ocmema:*project*))
+  (setq units (ocmema:get-draw-units ocmema:*project*))
+  (setq scale (ocmema:get-draw-scale ocmema:*project*))
   (setq wall_cm (ocmema:pio-assoc-get "wall_cm" ocmema:*project*))
   (if (and (not kv) (not points))
     (setq *ocm_pts_reason* "points_raw no encontrado")
@@ -4466,7 +4907,11 @@
       nil
     )
     (progn
-      (setq widths_draw (ocmema:pl-widths-cm->draw widths_cm units scale))
+      (setq widths_profile (ocmema:pl-anl-width-profiles-cm anlPath pnorm units scale))
+      (setq outer_widths_cm (if widths_profile (ocmema:pio-assoc-get "outer" widths_profile) widths_cm))
+      (setq inner_widths_cm (if widths_profile (ocmema:pio-assoc-get "inner" widths_profile) nil))
+      (setq widths_draw (ocmema:pl-widths-cm->draw outer_widths_cm units scale))
+      (setq inner_draw (if inner_widths_cm (ocmema:pl-widths-cm->draw inner_widths_cm units scale) nil))
       (if (or (not widths_draw) (= (length widths_draw) 0))
         (progn
           (ocmema:proj-warn
@@ -4480,13 +4925,14 @@
             (progn
               (ocmema:proj-warn "Widths ANL no coinciden con numero de tramos; usando primer width.")
               (setq widths_draw (list (car widths_draw)))
+              (if inner_draw (setq inner_draw (list (car inner_draw))))
             )
           )
           (setq w_used (car widths_draw))
         )
       )
       (setq ext_cm (if (numberp wall_cm) (/ wall_cm 2.0) 0.0))
-      (setq ext_draw (if (numberp wall_cm) (ocmema:cm->draw ext_cm scale) 0.0))
+      (setq ext_draw (if (numberp wall_cm) (ocmema:cm->draw ext_cm units scale) 0.0))
       (setq offset_draw (if (numberp w_used) (/ w_used 2.0) 0.0))
       (setq nPts (length pnorm))
       (setq mode (if (and widths_draw (> (length widths_draw) 1)) "pline" "rect"))
@@ -4583,6 +5029,7 @@
             (strcat
               "\nOCMEMA DBG: beam=" (if name (vl-princ-to-string name) "<sin nombre>")
               " align=" (if align align "")
+              " units=" (vl-princ-to-string units)
               " wall_cm=" (vl-princ-to-string (if wall_cm wall_cm 0.0))
               " ext_cm=" (vl-princ-to-string ext_cm)
               " ext_draw=" (vl-princ-to-string ext_draw)
@@ -4596,6 +5043,9 @@
 
           (setq centerEnt (ocmema:draw-lwpoly center nil ocmema:*pl-centerline-layer* ocmema:*pl-beam-color*))
           (setq rectEnt (ocmema:draw-lwpoly rect T ocmema:*pl-outline-layer* ocmema:*pl-beam-color*))
+          (if (and inner_draw widths_draw (= (length inner_draw) (length widths_draw)))
+            (ocmema:pl-draw-secondary-contours center widths_draw inner_draw ext_ini ext_fin)
+          )
 
           (setq labelOk "FAIL")
           (setq hatchOk "FAIL")
@@ -4623,11 +5073,16 @@
   )
 )
 
-(defun ocmema:menu-dibujar-planta-trabes-una (/ path name beams beam widths mode ext ext_ini ext_fin wall_cm scale)
+(defun ocmema:menu-dibujar-planta-trabes-una (/ path name beams beam widths mode ext ext_ini ext_fin wall_cm scale resp is-type)
+  (initget "S N")
+  (setq resp (getkword "\nEs trabe tipo? [S/N] <N>: "))
+  (setq is-type (= resp "S"))
   (setq path (getfiled "Selecciona ANL de trabe" (ocmema:pl-default-beam-dir) "ANL;STD;TXT" 0))
   (if (not path)
     (ocmema:proj-cancelled)
-    (progn
+    (if is-type
+      (ocmema:menu-dibujar-planta-trabe-tipo path)
+      (progn
       (setq name (ocmema:pl-infer-beam-name path))
       (setq beams (ocmema:proj-get-beams))
       (if (not name)
@@ -4649,8 +5104,8 @@
                   (setq mode (getkword "\nExtension extremos [A Auto/M Manual] <A>: "))
                   (if (not mode) (setq mode "A"))
                   (setq wall_cm (ocmema:pio-assoc-get "wall_cm" ocmema:*project*))
-                  (setq scale (ocmema:get-scale ocmema:*project*))
-                  (setq ext (ocmema:pl-get-extents mode wall_cm (ocmema:pio-assoc-get "units" ocmema:*project*) scale))
+                  (setq scale (ocmema:get-draw-scale ocmema:*project*))
+                  (setq ext (ocmema:pl-get-extents mode wall_cm (ocmema:get-draw-units ocmema:*project*) scale))
                   (setq ext_ini (car ext))
                   (setq ext_fin (cadr ext))
                   (setq widths (ocmema:anl-extract-widths-cm path))
@@ -4665,6 +5120,7 @@
       )
     )
   )
+)
 )
 
 (defun ocmema:safe-pick-folder (prompt defaultDir / path r sh folder file)
@@ -4716,8 +5172,8 @@
             (setq filemap (cons (cons key (strcat folder "\\" f)) filemap))
           )
           (setq wall_cm (ocmema:pio-assoc-get "wall_cm" ocmema:*project*))
-          (setq scale (ocmema:get-scale ocmema:*project*))
-          (setq units (ocmema:pio-assoc-get "units" ocmema:*project*))
+          (setq scale (ocmema:get-draw-scale ocmema:*project*))
+          (setq units (ocmema:get-draw-units ocmema:*project*))
           (initget "S N")
           (setq resp (getkword "\n¿Usar extensión automática para TODAS las trabes? [S/N] <S>: "))
           (if (or (not resp) (= resp "S"))
@@ -5116,6 +5572,53 @@
       )
       (ocmema:str-trim out)
     )
+  )
+)
+
+(defun ocmema:pl-temp-beam (name points /)
+  (list
+    (cons "name" name)
+    (cons "plant_idx" 0)
+    (cons "align" "")
+    (cons "n_points" (length points))
+    (cons "points_raw" points)
+    (cons "meta_kv" "TYPE=PLANTA")
+  )
+)
+
+(defun ocmema:pl-capture-two-points (/ old p1 p2)
+  (setq old (getvar "OSMODE"))
+  (setvar "OSMODE" 2179)
+  (setq p1 (getpoint "\nPunto inicial <Enter terminar>: "))
+  (if p1
+    (setq p2 (getpoint p1 "\nPunto final: "))
+  )
+  (setvar "OSMODE" old)
+  (if (and p1 p2) (list p1 p2) nil)
+)
+
+(defun ocmema:menu-dibujar-planta-trabe-tipo (path / name widths mode ext ext_ini ext_fin wall_cm scale units points beam drawn)
+  (setq name (or (ocmema:pl-infer-beam-name path) (vl-filename-base path)))
+  (setq units (ocmema:get-draw-units ocmema:*project*))
+  (setq scale (ocmema:get-draw-scale ocmema:*project*))
+  (setq wall_cm (ocmema:pio-assoc-get "wall_cm" ocmema:*project*))
+  (initget "A M")
+  (setq mode (getkword "\nExtension extremos [A Auto/M Manual] <A>: "))
+  (if (not mode) (setq mode "A"))
+  (setq ext (ocmema:pl-get-extents mode wall_cm units scale))
+  (setq ext_ini (car ext))
+  (setq ext_fin (cadr ext))
+  (setq widths (ocmema:anl-extract-widths-cm path))
+  (setq drawn 0)
+  (while (setq points (ocmema:pl-capture-two-points))
+    (setq beam (ocmema:pl-temp-beam name points))
+    (if (ocmema:pl-draw-beam beam widths path mode ext_ini ext_fin)
+      (setq drawn (1+ drawn))
+    )
+  )
+  (if (> drawn 0)
+    (ocmema:proj-log (strcat "OCMEMA: Se colocaron " (itoa drawn) " instancias de la trabe tipo " name "."))
+    (ocmema:proj-cancelled)
   )
 )
 
@@ -6048,6 +6551,237 @@
   member-ids
 )
 
+(defun ocmema:model3d-prompt-type-count (beam-count / raw val ok)
+  (setq ok nil)
+  (while (not ok)
+    (setq raw (getint (strcat "\nCuantas trabes tipo hay?: ")))
+    (cond
+      ((not raw) (setq val 0 ok T))
+      ((or (< raw 0) (> raw beam-count))
+       (ocmema:proj-log (strcat "Ingresa un valor entre 0 y " (itoa beam-count) "."))
+      )
+      (T
+       (setq val raw)
+       (setq ok T)
+      )
+    )
+  )
+  val
+)
+
+(defun ocmema:model3d-first-number-after-label (line label / pos rest toks tok num)
+  (setq num nil)
+  (setq pos (vl-string-search (strcase label) (strcase line)))
+  (if pos
+    (progn
+      (setq rest (substr line (+ pos (strlen label) 1)))
+      (setq toks (ocmema:pio-split-list rest " "))
+      (foreach tok toks
+        (if (and (not num) (ocmema:anl-number-p tok))
+          (setq num (distof tok 2))
+        )
+      )
+    )
+  )
+  num
+)
+
+(defun ocmema:model3d-block-metrics (block / ratio astmax in-long parts ast line)
+  (setq ratio -1.0)
+  (setq astmax -1.0)
+  (setq in-long nil)
+  (foreach line block
+    (cond
+      ((wcmatch (strcase line) "*CRITICAL RATIO*")
+       (setq ratio (max ratio (or (ocmema:model3d-first-number-after-label line "Critical Ratio") -1.0)))
+      )
+      ((wcmatch (strcase line) "*LONGITUDINAL BAR DETAILS*")
+       (setq in-long T)
+      )
+      ((and in-long
+            (or (wcmatch (strcase line) "*LONGITUDINAL BAR LAYOUT*")
+                (wcmatch (strcase line) "*TRANSVERSE BAR LAYOUT*")))
+       (setq in-long nil)
+      )
+      ((and in-long (wcmatch line "*|*"))
+       (setq parts (ocmema:pio-split-list line "|"))
+       (if (and (>= (length parts) 3) (ocmema:anl-number-p (nth 2 parts)))
+         (progn
+           (setq ast (distof (nth 2 parts) 2))
+           (if (> ast astmax) (setq astmax ast))
+         )
+       )
+      )
+    )
+  )
+  (list ratio astmax)
+)
+
+(defun ocmema:model3d-select-critical-member (design-blocks member-ids / best-mid best-ratio best-ast mid metrics ratio ast)
+  (setq best-mid nil)
+  (setq best-ratio -1.0)
+  (setq best-ast -1.0)
+  (foreach mid member-ids
+    (setq metrics (ocmema:model3d-block-metrics (cdr (ocmema:model3d-safe-assoc mid design-blocks))))
+    (setq ratio (car metrics))
+    (setq ast (cadr metrics))
+    (if (or (not best-mid)
+            (> ratio best-ratio)
+            (and (equal ratio best-ratio 1e-6) (> ast best-ast)))
+      (progn
+        (setq best-mid mid)
+        (setq best-ratio ratio)
+        (setq best-ast ast)
+      )
+    )
+  )
+  best-mid
+)
+
+(defun ocmema:model3d-generate-beam (beam-name member-ids geom path target-dir / mid chain props mode-info mode design-blocks final-lines
+                                               final-path geom-path fc res saved all-found stage-run stage-check support-nodes)
+  (setq stage-run
+    (vl-catch-all-apply
+      'ocmema:model3d-build-chain
+      (list member-ids (ocmema:pio-assoc-get "members" geom) (ocmema:pio-assoc-get "nodes" geom))
+    )
+  )
+  (if (vl-catch-all-error-p stage-run)
+    (progn
+      (ocmema:proj-warn (strcat "Fallo en Modelo3D al construir la cadena: " (vl-catch-all-error-message stage-run)))
+      nil
+    )
+    (progn
+      (setq chain stage-run)
+      (if (not (car chain))
+        (progn
+          (ocmema:proj-warn (cadr chain))
+          nil
+        )
+        (progn
+          (setq stage-check (ocmema:model3d-validate-chain chain))
+          (if (not (car stage-check))
+            (progn
+              (ocmema:proj-warn (cadr stage-check))
+              nil
+            )
+            (progn
+              (setq props (ocmema:pio-assoc-get "props" geom))
+              (setq stage-run
+                (vl-catch-all-apply
+                  'ocmema:model3d-mode-from-props
+                  (list member-ids props)
+                )
+              )
+              (if (vl-catch-all-error-p stage-run)
+                (progn
+                  (ocmema:proj-warn (strcat "Fallo en Modelo3D al detectar modo de seccion: " (vl-catch-all-error-message stage-run)))
+                  nil
+                )
+                (progn
+                  (setq mode-info stage-run)
+                  (if (not (car mode-info))
+                    (progn
+                      (ocmema:proj-warn (cadr mode-info))
+                      nil
+                    )
+                    (progn
+                      (setq mode (cadr mode-info))
+                      (setq stage-run
+                        (vl-catch-all-apply
+                          'ocmema:model3d-extract-design-blocks
+                          (list (ocmema:pio-assoc-get "lines" geom) member-ids)
+                        )
+                      )
+                      (if (vl-catch-all-error-p stage-run)
+                        (progn
+                          (ocmema:proj-warn (strcat "Fallo en Modelo3D al extraer detallado real: " (vl-catch-all-error-message stage-run)))
+                          nil
+                        )
+                        (progn
+                          (setq design-blocks stage-run)
+                          (setq all-found T)
+                          (foreach mid member-ids
+                            (if (not (ocmema:model3d-safe-assoc mid design-blocks))
+                              (setq all-found nil)
+                            )
+                          )
+                          (if (not all-found)
+                            (progn
+                              (ocmema:proj-warn "No se encontro el detallado real de todos los miembros seleccionados.")
+                              nil
+                            )
+                            (progn
+                              (setq fc (ocmema:pio-to-number (ocmema:pio-assoc-get "fc" geom)))
+                              (if (not (numberp fc))
+                                (setq fc 200.0)
+                              )
+                              (setq geom-path (ocmema:proj-join-path target-dir "_OCMEMA_MODELO3D_GEOM_TMP.ANL"))
+                              (setq final-path (ocmema:proj-join-path target-dir (strcat (ocmema:pio-sanitize-name beam-name) ".ANL")))
+                              (setq stage-run
+                                (vl-catch-all-apply
+                                  'ocmema:model3d-geom-lines
+                                  (list chain props)
+                                )
+                              )
+                              (if (vl-catch-all-error-p stage-run)
+                                (progn
+                                  (ocmema:proj-warn (strcat "Fallo en Modelo3D al generar geometria temporal: " (vl-catch-all-error-message stage-run)))
+                                  nil
+                                )
+                                (progn
+                                  (ocmema:pio-write-lines geom-path stage-run)
+                                  (setq support-nodes (ocmema:model3d-support-nodes chain member-ids (ocmema:pio-assoc-get "members" geom) (ocmema:pio-assoc-get "supports" geom)))
+                                  (setq stage-run
+                                    (vl-catch-all-apply
+                                      'ocmema:model3d-final-anl-lines
+                                      (list beam-name chain props fc design-blocks support-nodes)
+                                    )
+                                  )
+                                  (if (vl-catch-all-error-p stage-run)
+                                    (progn
+                                      (ocmema:proj-warn (strcat "Fallo en Modelo3D al generar ANL final: " (vl-catch-all-error-message stage-run)))
+                                      nil
+                                    )
+                                    (progn
+                                      (setq final-lines stage-run)
+                                      (setq saved (ocmema:pio-write-lines final-path final-lines))
+                                      (if (not saved)
+                                        (progn
+                                          (ocmema:proj-warn (strcat "No se pudo escribir el archivo final: " final-path))
+                                          nil
+                                        )
+                                        (progn
+                                          (ocmema:model3d-upsert-project-beam beam-name final-path path member-ids mode)
+                                          (ocmema:proj-autosave-from "MODELO3D beam generation")
+                                          (princ (strcat "\nArmando trabe Modelo3D: " (vl-filename-base final-path) ".ANL"))
+                                          (setq res (ocmema:call-with-osmode-off 'ocmema:beam:run-by-mode (list mode final-path)))
+                                          (if (not (car res))
+                                            (ocmema:proj-warn (strcat "Se genero el ANL, pero fallo el armado automatico: " (cadr res)))
+                                          )
+                                          T
+                                        )
+                                      )
+                                    )
+                                  )
+                                )
+                              )
+                            )
+                          )
+                        )
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+)
+
 (defun ocmema:model3d-target-dir (model-path / dir)
   (setq dir (if (and model-path (/= model-path ""))
               (vl-filename-directory model-path)
@@ -6063,8 +6797,7 @@
   )
 )
 
-(defun ocmema:armados-trabes-modelo3d (/ path geom beam-count beam-idx beam-name member-ids mid chain props mode-info mode design-blocks final-lines
-                                          target-dir final-path geom-path fc res saved all-found stage-run stage-check support-nodes)
+(defun ocmema:armados-trabes-modelo3d (/ path geom beam-count beam-idx beam-name member-ids target-dir type-count resp type-idx critical-mid ok)
   (setq path (getfiled "Selecciona archivo ANL original del modelo" (ocmema:pl-default-beam-dir) "ANL" 0))
   (if (not path)
     (ocmema:proj-cancelled)
@@ -6081,6 +6814,9 @@
             (if (not beam-count)
               (ocmema:proj-cancelled)
               (progn
+                (initget "S N")
+                (setq resp (getkword "\nHay trabes tipo? [S/N] <N>: "))
+                (setq type-count (if (= resp "S") (ocmema:model3d-prompt-type-count beam-count) 0))
                 (setq target-dir (ocmema:model3d-target-dir path))
                 (if (and target-dir (/= target-dir ""))
                   (progn
@@ -6089,153 +6825,43 @@
                   )
                 )
                 (setq beam-idx 1)
+                (setq type-idx 1)
                 (while (<= beam-idx beam-count)
                   (setq beam-name (ocmema:pio-get-nonempty-string (strcat "\nNombre de la trabe " (itoa beam-idx) ": ")))
                   (if (not beam-name)
                     (setq beam-idx (1+ beam-count))
                     (progn
+                      (if (<= type-idx type-count)
+                        (princ (strcat "\nOCMEMA: Capturando miembros de trabe tipo " (itoa type-idx) " para evaluar el miembro mas critico."))
+                      )
                       (setq member-ids (ocmema:model3d-prompt-member-list (ocmema:pio-assoc-get "members" geom)))
-                      (if member-ids
+                      (if (and member-ids (<= type-idx type-count))
                         (progn
-                          (setq stage-run
-                            (vl-catch-all-apply
-                              'ocmema:model3d-build-chain
-                              (list member-ids (ocmema:pio-assoc-get "members" geom) (ocmema:pio-assoc-get "nodes" geom))
+                          (setq critical-mid
+                            (ocmema:model3d-select-critical-member
+                              (ocmema:model3d-extract-design-blocks (ocmema:pio-assoc-get "lines" geom) member-ids)
+                              member-ids
                             )
                           )
-                          (if (vl-catch-all-error-p stage-run)
+                          (if critical-mid
                             (progn
-                              (ocmema:proj-warn (strcat "Fallo en Modelo3D al construir la cadena: " (vl-catch-all-error-message stage-run)))
-                              (setq beam-idx (1+ beam-count))
+                              (princ (strcat "\nOCMEMA: Miembro critico seleccionado para <" beam-name ">: " (itoa critical-mid)))
+                              (setq member-ids (list critical-mid))
+                              (setq type-idx (1+ type-idx))
                             )
                             (progn
-                              (setq chain stage-run)
-                              (if (not (car chain))
-                                (progn
-                                  (ocmema:proj-warn (cadr chain))
-                                  (setq beam-idx (1+ beam-count))
-                                )
-                                (progn
-                                  (setq stage-check (ocmema:model3d-validate-chain chain))
-                                  (if (not (car stage-check))
-                                    (progn
-                                      (ocmema:proj-warn (cadr stage-check))
-                                      (setq beam-idx (1+ beam-count))
-                                    )
-                                    (progn
-                                      (setq props (ocmema:pio-assoc-get "props" geom))
-                                      (setq stage-run
-                                        (vl-catch-all-apply
-                                          'ocmema:model3d-mode-from-props
-                                          (list member-ids props)
-                                        )
-                                      )
-                                      (if (vl-catch-all-error-p stage-run)
-                                        (progn
-                                          (ocmema:proj-warn (strcat "Fallo en Modelo3D al detectar modo de seccion: " (vl-catch-all-error-message stage-run)))
-                                          (setq beam-idx (1+ beam-count))
-                                        )
-                                        (progn
-                                          (setq mode-info stage-run)
-                                          (if (not (car mode-info))
-                                            (progn
-                                              (ocmema:proj-warn (cadr mode-info))
-                                              (setq beam-idx (1+ beam-count))
-                                            )
-                                            (progn
-                                              (setq mode (cadr mode-info))
-                                              (setq stage-run
-                                                (vl-catch-all-apply
-                                                  'ocmema:model3d-extract-design-blocks
-                                                  (list (ocmema:pio-assoc-get "lines" geom) member-ids)
-                                                )
-                                              )
-                                              (if (vl-catch-all-error-p stage-run)
-                                                (progn
-                                                  (ocmema:proj-warn (strcat "Fallo en Modelo3D al extraer detallado real: " (vl-catch-all-error-message stage-run)))
-                                                  (setq beam-idx (1+ beam-count))
-                                                )
-                                                (progn
-                                                  (setq design-blocks stage-run)
-                                                  (setq all-found T)
-                                                  (foreach mid member-ids
-                                                    (if (not (ocmema:model3d-safe-assoc mid design-blocks))
-                                                      (setq all-found nil)
-                                                    )
-                                                  )
-                                                  (if (not all-found)
-                                                    (progn
-                                                      (ocmema:proj-warn "No se encontro el detallado real de todos los miembros seleccionados.")
-                                                      (setq beam-idx (1+ beam-count))
-                                                    )
-                                                    (progn
-                                      (setq fc (ocmema:pio-to-number (ocmema:pio-assoc-get "fc" geom)))
-                                      (if (not (numberp fc))
-                                        (setq fc 200.0)
-                                      )
-                                                      (setq geom-path (ocmema:proj-join-path target-dir "_OCMEMA_MODELO3D_GEOM_TMP.ANL"))
-                                                      (setq final-path (ocmema:proj-join-path target-dir (strcat (ocmema:pio-sanitize-name beam-name) ".ANL")))
-                                                      (setq stage-run
-                                                        (vl-catch-all-apply
-                                                          'ocmema:model3d-geom-lines
-                                                          (list chain props)
-                                                        )
-                                                      )
-                                                      (if (vl-catch-all-error-p stage-run)
-                                                        (progn
-                                                          (ocmema:proj-warn (strcat "Fallo en Modelo3D al generar geometria temporal: " (vl-catch-all-error-message stage-run)))
-                                                          (setq beam-idx (1+ beam-count))
-                                                        )
-                                                        (progn
-                                                          (ocmema:pio-write-lines geom-path stage-run)
-                                                          (setq support-nodes (ocmema:model3d-support-nodes chain member-ids (ocmema:pio-assoc-get "members" geom) (ocmema:pio-assoc-get "supports" geom)))
-                                                          (setq stage-run
-                                                            (vl-catch-all-apply
-                                                              'ocmema:model3d-final-anl-lines
-                                                              (list beam-name chain props fc design-blocks support-nodes)
-                                                            )
-                                                          )
-                                                          (if (vl-catch-all-error-p stage-run)
-                                                            (progn
-                                                              (ocmema:proj-warn (strcat "Fallo en Modelo3D al generar ANL final: " (vl-catch-all-error-message stage-run)))
-                                                              (setq beam-idx (1+ beam-count))
-                                                            )
-                                                            (progn
-                                                              (setq final-lines stage-run)
-                                                              (setq saved (ocmema:pio-write-lines final-path final-lines))
-                                                              (if (not saved)
-                                                                (progn
-                                                                  (ocmema:proj-warn (strcat "No se pudo escribir el archivo final: " final-path))
-                                                                  (setq beam-idx (1+ beam-count))
-                                                                )
-                                                                (progn
-                                                                  (ocmema:model3d-upsert-project-beam beam-name final-path path member-ids mode)
-                                                                  (ocmema:proj-autosave-from "MODELO3D beam generation")
-                                                                  (princ (strcat "\nArmando trabe Modelo3D: " (vl-filename-base final-path) ".ANL"))
-                                                                  (setq res (ocmema:beam:run-by-mode mode final-path))
-                                                                  (if (not (car res))
-                                                                    (ocmema:proj-warn (strcat "Se genero el ANL, pero fallo el armado automatico: " (cadr res)))
-                                                                  )
-                                                                  (setq beam-idx (1+ beam-idx))
-                                                                )
-                                                              )
-                                                            )
-                                                          )
-                                                        )
-                                                      )
-                                                    )
-                                                  )
-                                                )
-                                              )
-                                            )
-                                          )
-                                        )
-                                      )
-                                    )
-                                  )
-                                )
-                              )
+                              (ocmema:proj-warn "No se pudo determinar un miembro critico para la trabe tipo.")
+                              (setq member-ids nil)
                             )
+                          )
+                        )
+                      )
+                      (if member-ids
+                        (progn
+                          (setq ok (ocmema:model3d-generate-beam beam-name member-ids geom path target-dir))
+                          (if ok
+                            (setq beam-idx (1+ beam-idx))
+                            (setq beam-idx (1+ beam-count))
                           )
                         )
                         (setq beam-idx (1+ beam-count))
@@ -6309,7 +6935,7 @@
           )
         )
         (princ (strcat "\nArmando trabe: " (vl-filename-base path) ".ANL"))
-        (setq res (ocmema:beam:run-by-mode mode path))
+        (setq res (ocmema:call-with-osmode-off 'ocmema:beam:run-by-mode (list mode path)))
         (if (not (car res))
           (progn
             (if (= mode "VAR")
@@ -6357,7 +6983,7 @@
                     (setq info (ocmema:beam:detect-section-info path))
                     (setq mode (ocmema:pio-assoc-get "mode" info))
                     (princ (strcat "\nArmando trabe: " f " mode=" mode))
-                    (setq res (ocmema:beam:run-by-mode mode path))
+                    (setq res (ocmema:call-with-osmode-off 'ocmema:beam:run-by-mode (list mode path)))
                     (if (car res)
                       (setq ok (1+ ok))
                       (progn
