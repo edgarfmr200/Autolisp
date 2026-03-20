@@ -167,7 +167,7 @@
      (setq tries 0)
      (while (< tries 2)
        (princ "\nOCMEMA DBG: pidiendo calibre baston (fn=ocmema:ask-baston-calibre)")
-       (setq raw (vl-catch-all-apply '(lambda () (getstring T "\nCalibre baston (3/4/5) <3>: "))))
+       (setq raw (vl-catch-all-apply '(lambda () (getstring T "\nCalibre baston (3/4/5/6/8) <3>: "))))
        (if (vl-catch-all-error-p raw)
          (progn
            (princ (strcat "\nOCMEMA WARN: error leyendo calibre baston: " (vl-catch-all-error-message raw)))
@@ -180,10 +180,10 @@
        (if (and (not n) (= (type raw) 'STR))
          (progn
            (setq raw (vl-string-translate "#" "" (vl-string-trim " \t" raw)))
-           (if (member raw '("3" "4" "5")) (setq n raw))
+           (if (member raw '("3" "4" "5" "6" "8")) (setq n raw))
          )
        )
-       (if (member n '("3" "4" "5")) (progn (setq tries 99)) (progn (princ "\nOCMEMA WARN: calibre invalido, usando default 3") (setq n "3") (setq tries 99)))
+       (if (member n '("3" "4" "5" "6" "8")) (progn (setq tries 99)) (progn (princ "\nOCMEMA WARN: calibre invalido, usando default 3") (setq n "3") (setq tries 99)))
        (setq tries (1+ tries))
      )
      n
@@ -484,8 +484,8 @@
   (defun ocmema--floor5cm (v) (* 5.0 (fix (/ v 5.0))))
   (defun ocmema--ceil5cm (v) (* 5.0 (fix (+ (/ v 5.0) 0.9999))))
 
-  (defun ocmema--interp-borders-dist (pts needFlags iStart iEnd asLong d_cm face L_total_cm / n x0 y0 x1 y1 m b xStar inSeg distLstar distRstar Ld_cm distL distR ok reason)
-    (setq n (length pts) ok T reason nil)
+  (defun ocmema--interp-borders-dist (pts needFlags iStart iEnd asLong d_cm face L_total_cm / n x0 y0 x1 y1 m b xStar inSeg distLstar distRstar Ld_cm distL distR ok reason addR_cm)
+    (setq n (length pts) ok T reason nil addR_cm 0.0)
     (if (or (not (numberp d_cm)) (<= d_cm 0.0)) (setq ok nil reason "no_d"))
     (if (and ok (or (< iStart 0) (< iEnd 0) (>= iStart n) (>= iEnd n))) (setq ok nil reason "bad_idx"))
     ;; Left edge
@@ -499,9 +499,18 @@
               (progn
                 (setq x0 (car (nth (1- iStart) pts)) y0 (cadr (nth (1- iStart) pts)))
                 (setq x1 (car (nth iStart pts)) y1 (cadr (nth iStart pts)))
-                (if (or (equal x0 x1 1e-9) (equal y0 y1 1e-9))
-                  (setq ok nil reason "flat_L")
-                  (progn
+                (cond
+                  ;; En un nodo compartido puede cambiar la demanda sin delta de distancia.
+                  ;; En ese caso el borde real del baston queda en el propio nodo.
+                  ((equal x0 x1 1e-9)
+                    (if (and (<= y0 asLong) (> y1 asLong))
+                      (setq distLstar x1)
+                      (setq ok nil reason "flat_L"))
+                  )
+                  ((equal y0 y1 1e-9)
+                    (setq ok nil reason "flatY_L")
+                  )
+                  (T
                     (setq m (/ (- y1 y0) (- x1 x0)))
                     (setq b (- y0 (* m x0)))
                     (setq xStar (/ (- asLong b) m))
@@ -526,9 +535,21 @@
             (progn
               (setq x0 (car (nth iEnd pts)) y0 (cadr (nth iEnd pts)))
               (setq x1 (car (nth (1+ iEnd) pts)) y1 (cadr (nth (1+ iEnd) pts)))
-              (if (or (equal x0 x1 1e-9) (equal y0 y1 1e-9))
-                (setq ok nil reason "flat_R")
-                (progn
+              (cond
+                ;; Si el ultimo punto del miembro aun pide acero y el primero del siguiente ya no,
+                ;; no se puede interpolar en X; se toma el nodo y se agrega 30 cm ademas de 12phi.
+                ((equal x0 x1 1e-9)
+                  (if (and (> y0 asLong) (<= y1 asLong))
+                    (progn
+                      (setq distRstar x0)
+                      (setq addR_cm 30.0)
+                    )
+                    (setq ok nil reason "flat_R"))
+                )
+                ((equal y0 y1 1e-9)
+                  (setq ok nil reason "flatY_R")
+                )
+                (T
                   (setq m (/ (- y1 y0) (- x1 x0)))
                   (setq b (- y0 (* m x0)))
                   (setq xStar (/ (- asLong b) m))
@@ -547,7 +568,7 @@
       (progn
         (setq Ld_cm (* 12.0 d_cm))
         (setq distL (- distLstar Ld_cm))
-        (setq distR (+ distRstar Ld_cm))
+        (setq distR (+ distRstar Ld_cm addR_cm))
       )
     )
     (if (not ok)
@@ -1261,7 +1282,8 @@
      (if (= numZonesEstribos 1) (setq lenZoneEst l_total_m) (setq lenZoneEst (getreal (strcat "\nLongitud Zona " (itoa i) " (m): "))))
      (setq s_estribo (getreal (strcat "Separacion Zona " (itoa i) " (cm): ")))
      (if (> s_estribo limitEstribos) (princ (strcat "\n** AVISO: Sep " (rtos s_estribo 2 0) " > Limite " (rtos limitEstribos 2 0) " **")))
-     (setq qtyEstribos (+ (fix (+ (/ (* lenZoneEst 100.0) s_estribo) 0.99)) 1))
+     (setq qtyEstribos (fix (+ (/ (* lenZoneEst 100.0) s_estribo) 0.99)))
+     (if (= i 1) (setq qtyEstribos (1+ qtyEstribos)))
      (setq txtEstribo (strcat (itoa qtyEstribos) "@" (rtos s_estribo 2 0)))
      (setq pTextEst (list (+ (car p1) 0.5 currentDist (/ lenZoneEst 2.0)) yTextEstribos))
      (command "_.TEXT" "_J" "_MC" pTextEst 0.15 0 txtEstribo) (command "_.CHPROP" (entlast) "" "Color" 8 "")
