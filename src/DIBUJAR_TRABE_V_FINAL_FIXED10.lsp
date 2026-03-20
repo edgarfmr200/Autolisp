@@ -1559,6 +1559,7 @@
   ;; ACERO CARA PLANA (continuo)
   ;; -----------------------------
   (princ "\n--- ACERO CARA PLANA (continuo) ---")
+  (princ (strcat "\nAs requerido cara plana: " (rtos asMinGlobal 2 3) " cm2"))
   (setq varPlan (getstring "\nNumero varilla Cara Plana (ej. 3, 4): "))
   (while (not (ocmema--rebar-valid-p varPlan))
     (princ "\nNumero de varilla invalido. Intenta de nuevo.")
@@ -1653,6 +1654,7 @@
 
       ;; Acero ancha en cara escalonada (continuo y con Y fija del tramo ancho)
       (princ "\n--- ACERO CARA ESCALONADA: Seccion ANCHA (continuo) ---")
+      (princ (strcat "\nAs requerido seccion ancha: " (rtos asMinWide 2 3) " cm2"))
       (setq varWide (getstring "\nNumero varilla (Cara Escalonada - ANCHA): "))
       (while (not (ocmema--rebar-valid-p varWide))
         (princ "\nNumero de varilla invalido. Intenta de nuevo.")
@@ -1713,6 +1715,7 @@
 
 
       (princ "\n--- ACERO CARA ESCALONADA: Seccion PERALTADA (solo en tramos peraltados) ---")
+      (princ (strcat "\nAs requerido seccion peraltada: " (rtos asMinDeep 2 3) " cm2"))
       (setq varDeep (getstring "\nNumero varilla (Seccion PERALTADA): "))
       (while (not (ocmema--rebar-valid-p varDeep))
         (princ "\nNumero de varilla invalido. Intenta de nuevo.")
@@ -2141,6 +2144,14 @@
           )
           (if segDef
             (progn
+              (princ
+                (strcat
+                  "\nResumen baston " (if isTopFace "SUP" "INF")
+                  " (" (strcase segTypeStr) "):"
+                  " Dif requerida=" (rtos segDef 2 2) " cm2"
+                  " | mID=" (if (= startMemberId endMemberId) (itoa startMemberId) (strcat (itoa startMemberId) "-" (itoa endMemberId)))
+                )
+              )
               (if isTopFace
                 (setq strVarBast (getstring "\nCalibre Baston (Sup): "))
                 (setq strVarBast (getstring "\nCalibre Baston (Inf): "))
